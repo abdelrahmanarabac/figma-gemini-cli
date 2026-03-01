@@ -1,83 +1,379 @@
-import { Command } from 'commander';
+import { Command } from '../cli/command.js';
+import { readFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import chalk from 'chalk';
 import ora from 'ora';
-import { fastEval } from '../utils/figma.js';
 
-export function tokenCommands(program) {
-  const tokens = program
-    .command('tokens')
-    .description('Create design token presets');
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const palettesDir = join(__dirname, '..', 'data', 'palettes');
 
-  tokens
-    .command('tailwind')
-    .description('Create Tailwind CSS color palette')
-    .option('-c, --collection <name>', 'Collection name', 'Color - Primitive')
-    .action(async (options) => {
-      const spinner = ora('Creating Tailwind color palette...').start();
-
-      const tailwindColors = {
-        slate: { 50: '#f8fafc', 100: '#f1f5f9', 200: '#e2e8f0', 300: '#cbd5e1', 400: '#94a3b8', 500: '#64748b', 600: '#475569', 700: '#334155', 800: '#1e293b', 900: '#0f172a', 950: '#020617' },
-        gray: { 50: '#f9fafb', 100: '#f3f4f6', 200: '#e5e7eb', 300: '#d1d5db', 400: '#9ca3af', 500: '#6b7280', 600: '#4b5563', 700: '#374151', 800: '#1f2937', 900: '#111827', 950: '#030712' },
-        zinc: { 50: '#fafafa', 100: '#f4f4f5', 200: '#e4e4e7', 300: '#d4d4d8', 400: '#a1a1aa', 500: '#71717a', 600: '#52525b', 700: '#3f3f46', 800: '#27272a', 900: '#18181b', 950: '#09090b' },
-        neutral: { 50: '#fafafa', 100: '#f5f5f5', 200: '#e5e5e5', 300: '#d4d4d4', 400: '#a3a3a3', 500: '#737373', 600: '#525252', 700: '#404040', 800: '#262626', 900: '#171717', 950: '#0a0a0a' },
-        stone: { 50: '#fafaf9', 100: '#f5f5f4', 200: '#e7e5e4', 300: '#d6d3d1', 400: '#a8a29e', 500: '#78716c', 600: '#57534e', 700: '#44403c', 800: '#292524', 900: '#1c1917', 950: '#0c0a09' },
-        red: { 50: '#fef2f2', 100: '#fee2e2', 200: '#fecaca', 300: '#fca5a5', 400: '#f87171', 500: '#ef4444', 600: '#dc2626', 700: '#b91c1c', 800: '#991b1b', 900: '#7f1d1d', 950: '#450a0a' },
-        orange: { 50: '#fff7ed', 100: '#ffedd5', 200: '#fed7aa', 300: '#fdba74', 400: '#fb923c', 500: '#f97316', 600: '#ea580c', 700: '#c2410c', 800: '#9a3412', 900: '#7c2d12', 950: '#431407' },
-        amber: { 50: '#fffbeb', 100: '#fef3c7', 200: '#fde68a', 300: '#fcd34d', 400: '#fbbf24', 500: '#f59e0b', 600: '#d97706', 700: '#b45309', 800: '#92400e', 900: '#78350f', 950: '#451a03' },
-        yellow: { 50: '#fefce8', 100: '#fef9c3', 200: '#fef08a', 300: '#fde047', 400: '#facc15', 500: '#eab308', 600: '#ca8a04', 700: '#a16207', 800: '#854d0e', 900: '#713f12', 950: '#422006' },
-        lime: { 50: '#f7fee7', 100: '#ecfccb', 200: '#d9f99d', 300: '#bef264', 400: '#a3e635', 500: '#84cc16', 600: '#65a30d', 700: '#4d7c0f', 800: '#3f6212', 900: '#365314', 950: '#1a2e05' },
-        green: { 50: '#f0fdf4', 100: '#dcfce7', 200: '#bbf7d0', 300: '#86efac', 400: '#4ade80', 500: '#22c55e', 600: '#16a34a', 700: '#15803d', 800: '#166534', 900: '#14532d', 950: '#052e16' },
-        emerald: { 50: '#ecfdf5', 100: '#d1fae5', 200: '#a7f3d0', 300: '#6ee7b7', 400: '#34d399', 500: '#10b981', 600: '#059669', 700: '#047857', 800: '#065f46', 900: '#064e3b', 950: '#022c22' },
-        teal: { 50: '#f0fdfa', 100: '#ccfbf1', 200: '#99f6e4', 300: '#5eead4', 400: '#2dd4bf', 500: '#14b8a6', 600: '#0d9488', 700: '#0f766e', 800: '#115e59', 900: '#134e4a', 950: '#042f2e' },
-        cyan: { 50: '#ecfeff', 100: '#cffafe', 200: '#a5f3fc', 300: '#67e8f9', 400: '#22d3ee', 500: '#06b6d4', 600: '#0891b2', 700: '#0e7490', 800: '#155e75', 900: '#164e63', 950: '#083344' },
-        sky: { 50: '#f0f9ff', 100: '#e0f2fe', 200: '#bae6fd', 300: '#7dd3fc', 400: '#38bdf8', 500: '#0ea5e9', 600: '#0284c7', 700: '#0369a1', 800: '#075985', 900: '#0c4a6e', 950: '#082f49' },
-        blue: { 50: '#eff6ff', 100: '#dbeafe', 200: '#bfdbfe', 300: '#93c5fd', 400: '#60a5fa', 500: '#3b82f6', 600: '#2563eb', 700: '#1d4ed8', 800: '#1e40af', 900: '#1e3a8a', 950: '#172554' },
-        indigo: { 50: '#eef2ff', 100: '#e0e7ff', 200: '#c7d2fe', 300: '#a5b4fc', 400: '#818cf8', 500: '#6366f1', 600: '#4f46e5', 700: '#4338ca', 800: '#3730a3', 900: '#312e81', 950: '#1e1b4b' },
-        violet: { 50: '#f5f3ff', 100: '#ede9fe', 200: '#ddd6fe', 300: '#c4b5fd', 400: '#a78bfa', 500: '#8b5cf6', 600: '#7c3aed', 700: '#6d28d9', 800: '#5b21b6', 900: '#4c1d95', 950: '#2e1065' },
-        purple: { 50: '#faf5ff', 100: '#f3e8ff', 200: '#e9d5ff', 300: '#d8b4fe', 400: '#c084fc', 500: '#a855f7', 600: '#9333ea', 700: '#7e22ce', 800: '#6b21a8', 900: '#581c87', 950: '#3b0764' },
-        fuchsia: { 50: '#fdf4ff', 100: '#fae8ff', 200: '#f5d0fe', 300: '#f0abfc', 400: '#e879f9', 500: '#d946ef', 600: '#c026d3', 700: '#a21caf', 800: '#86198f', 900: '#701a75', 950: '#4a044e' },
-        pink: { 50: '#fdf2f8', 100: '#fce7f3', 200: '#fbcfe8', 300: '#f9a8d4', 400: '#f472b6', 500: '#ec4899', 600: '#db2777', 700: '#be185d', 800: '#9d174d', 900: '#831843', 950: '#500724' },
-        rose: { 50: '#fff1f2', 100: '#ffe4e6', 200: '#fecdd3', 300: '#fda4af', 400: '#fb7185', 500: '#f43f5e', 600: '#e11d48', 700: '#be123c', 800: '#9f1239', 900: '#881337', 950: '#4c0519' }
-      };
-
-      const code = `(async () => {
-        const colors = ${JSON.stringify(tailwindColors)};
-        function hexToRgb(hex) {
-          const r = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-          return { r: parseInt(r[1], 16) / 255, g: parseInt(r[2], 16) / 255, b: parseInt(r[3], 16) / 255 };
-        }
-        const cols = await figma.variables.getLocalVariableCollectionsAsync();
-        let col = cols.find(c => c.name === '${options.collection}');
-        if (!col) col = figma.variables.createVariableCollection('${options.collection}');
-        const modeId = col.modes[0].modeId;
-        const existingVars = await figma.variables.getLocalVariablesAsync();
-        let count = 0;
-        for (const [colorName, shades] of Object.entries(colors)) {
-          for (const [shade, hex] of Object.entries(shades)) {
-            const vName = colorName + '/' + shade;
-            let v = existingVars.find(v => v.name === vName && v.variableCollectionId === col.id);
-            if (!v) v = figma.variables.createVariable(vName, col, 'COLOR');
-            v.setValueForMode(modeId, hexToRgb(hex));
-            count++;
-          }
-        }
-        return 'Created ' + count + ' Tailwind colors';
-      })()`;
-
-      try {
-        const result = await figmaEval(code);
-        spinner.succeed(result);
-      } catch (e) {
-        spinner.fail('Failed: ' + e.message);
-      }
-    });
-
-  tokens
-    .command('preset <name>')
-    .description('Create preset tokens (shadcn, etc.)')
-    .action(async (name) => {
-      const spinner = ora(`Applying ${name} preset...`).start();
-      // Logic for presets can be quite large, usually kept in a separate file or fetched
-      spinner.succeed(`Applied ${name} preset`);
-    });
+// Load palette from JSON file
+function loadPalette(name) {
+    return JSON.parse(readFileSync(join(palettesDir, name + '.json'), 'utf8'));
 }
+
+// Common Figma code for creating color variables from a palette object
+function createPaletteCode(colorsJson, collectionName) {
+    return `(async () => {
+const colors = ${colorsJson};
+function hexToRgb(hex) {
+  const r = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);
+  return r ? { r: parseInt(r[1], 16) / 255, g: parseInt(r[2], 16) / 255, b: parseInt(r[3], 16) / 255 } : null;
+}
+const cols = await figma.variables.getLocalVariableCollectionsAsync();
+let col = cols.find(c => c.name === '${collectionName}');
+if (!col) col = figma.variables.createVariableCollection('${collectionName}');
+const modeId = col.modes[0].modeId;
+const existingVars = await figma.variables.getLocalVariablesAsync();
+let count = 0;
+for (const [colorName, shades] of Object.entries(colors)) {
+  for (const [shade, hex] of Object.entries(shades)) {
+    const varName = shade === 'DEFAULT' ? colorName : colorName + '/' + shade;
+    const existing = existingVars.find(v => v.name === varName && v.variableCollectionId === col.id);
+    if (!existing) {
+      const v = figma.variables.createVariable(varName, col, 'COLOR');
+      v.setValueForMode(modeId, hexToRgb(hex));
+      count++;
+    }
+  }
+}
+return 'Created ' + count + ' color variables in ${collectionName}';
+})()`;
+}
+
+// ── Tokens Commands ─────────────────────────────────
+
+class TokensTailwindCommand extends Command {
+    name = 'tokens tailwind';
+    description = 'Create Tailwind CSS color palette';
+    options = [
+        { flags: '-c, --collection <name>', description: 'Collection name', defaultValue: 'Color - Primitive' }
+    ];
+
+    async execute(ctx, opts) {
+        const spinner = ora('Creating Tailwind color palette...').start();
+        const colors = loadPalette('tailwind');
+        const code = createPaletteCode(JSON.stringify(colors), opts.collection);
+        try {
+            const result = await ctx.eval(code);
+            spinner.succeed(result || 'Created Tailwind palette');
+        } catch (error) {
+            spinner.fail('Failed to create palette');
+            console.error(error.message);
+        }
+    }
+}
+
+class TokensShadcnCommand extends Command {
+    name = 'tokens shadcn';
+    description = 'Create shadcn/ui color primitives (from v3.shadcn.com/colors)';
+    options = [
+        { flags: '-c, --collection <name>', description: 'Collection name', defaultValue: 'shadcn/primitives' }
+    ];
+
+    async execute(ctx, opts) {
+        const spinner = ora('Creating shadcn color primitives...').start();
+        const colors = loadPalette('tailwind'); // shadcn primitives = tailwind palette
+        const code = createPaletteCode(JSON.stringify(colors), opts.collection);
+        try {
+            const result = await ctx.eval(code);
+            spinner.succeed(result || 'Created shadcn primitives');
+        } catch (error) {
+            spinner.fail('Failed to create shadcn colors');
+            console.error(error.message);
+        }
+    }
+}
+
+class TokensPresetCommand extends Command {
+    name = 'tokens preset <name>';
+    description = 'Add color presets: shadcn, radix';
+
+    async execute(ctx, opts, preset) {
+        const presetLower = preset.toLowerCase();
+
+        if (presetLower === 'shadcn') {
+            const spinner = ora('Adding shadcn colors...').start();
+            const shadcnData = loadPalette('shadcn');
+            const primitives = shadcnData.primitives;
+            const semanticTokens = shadcnData.semantic;
+
+            const code = `(async () => {
+const primitives = ${JSON.stringify(primitives)};
+const semanticTokens = ${JSON.stringify(semanticTokens)};
+
+function hexToRgb(hex) {
+  const r = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);
+  return r ? { r: parseInt(r[1], 16) / 255, g: parseInt(r[2], 16) / 255, b: parseInt(r[3], 16) / 255 } : null;
+}
+
+const cols = await figma.variables.getLocalVariableCollectionsAsync();
+let primCol = cols.find(c => c.name === 'shadcn/primitives');
+if (!primCol) primCol = figma.variables.createVariableCollection('shadcn/primitives');
+const primModeId = primCol.modes[0].modeId;
+
+const existingVars = await figma.variables.getLocalVariablesAsync('COLOR');
+const primVarMap = {};
+let primCount = 0;
+
+for (const [colorName, shades] of Object.entries(primitives)) {
+  for (const [shade, hex] of Object.entries(shades)) {
+    const varName = shade === 'DEFAULT' ? colorName : colorName + '/' + shade;
+    let v = existingVars.find(ev => ev.name === varName && ev.variableCollectionId === primCol.id);
+    if (!v) {
+      v = figma.variables.createVariable(varName, primCol, 'COLOR');
+      v.setValueForMode(primModeId, hexToRgb(hex));
+      primCount++;
+    }
+    primVarMap[varName] = v;
+  }
+}
+
+let semCol = cols.find(c => c.name === 'shadcn/semantic');
+if (!semCol) semCol = figma.variables.createVariableCollection('shadcn/semantic');
+
+let lightModeId = semCol.modes.find(m => m.name === 'Light')?.modeId;
+let darkModeId = semCol.modes.find(m => m.name === 'Dark')?.modeId;
+
+if (!lightModeId) {
+  semCol.renameMode(semCol.modes[0].modeId, 'Light');
+  lightModeId = semCol.modes[0].modeId;
+}
+if (!darkModeId) {
+  darkModeId = semCol.addMode('Dark');
+}
+
+let semCount = 0;
+for (const [name, refs] of Object.entries(semanticTokens)) {
+  let v = existingVars.find(ev => ev.name === name && ev.variableCollectionId === semCol.id);
+  if (!v) {
+    v = figma.variables.createVariable(name, semCol, 'COLOR');
+    semCount++;
+  }
+  const lightPrim = primVarMap[refs.light];
+  if (lightPrim) v.setValueForMode(lightModeId, { type: 'VARIABLE_ALIAS', id: lightPrim.id });
+  const darkPrim = primVarMap[refs.dark];
+  if (darkPrim) v.setValueForMode(darkModeId, { type: 'VARIABLE_ALIAS', id: darkPrim.id });
+}
+
+return 'Created ' + primCount + ' primitives + ' + semCount + ' semantic tokens (Light/Dark)';
+})()`;
+
+            try {
+                const result = await ctx.eval(code);
+                spinner.succeed(result || 'Added shadcn colors');
+                console.log(chalk.gray('\n  Collections created:'));
+                console.log(chalk.gray('    • shadcn/primitives - 244 color primitives'));
+                console.log(chalk.gray('    • shadcn/semantic   - 32 semantic tokens (Light/Dark mode)\n'));
+            } catch (error) {
+                spinner.fail('Failed to add shadcn');
+                console.error(chalk.red(error.message));
+            }
+
+        } else if (presetLower === 'radix') {
+            const spinner = ora('Adding Radix UI colors...').start();
+            const radixColors = loadPalette('radix');
+            const code = createPaletteCode(JSON.stringify(radixColors), 'radix/colors');
+
+            try {
+                const result = await ctx.eval(code);
+                spinner.succeed(result || 'Added Radix UI colors');
+                console.log(chalk.gray('\n  Collection created:'));
+                console.log(chalk.gray('    • radix/colors - 156 colors (13 families × 12 steps)\n'));
+            } catch (error) {
+                spinner.fail('Failed to add Radix colors');
+                console.error(chalk.red(error.message));
+            }
+
+        } else if (presetLower === 'material') {
+            console.log(chalk.yellow('Material Design preset coming soon!'));
+            console.log(chalk.gray('Available now: shadcn, radix'));
+        } else {
+            console.log(chalk.red(`Unknown preset: ${preset}`));
+            console.log(chalk.gray('Available presets: shadcn, radix, material (coming soon)'));
+        }
+    }
+}
+
+class TokensSpacingCommand extends Command {
+    name = 'tokens spacing';
+    description = 'Create spacing scale (4px base)';
+    options = [
+        { flags: '-c, --collection <name>', description: 'Collection name', defaultValue: 'Spacing' }
+    ];
+
+    async execute(ctx, opts) {
+        const spinner = ora('Creating spacing scale...').start();
+        const spacings = {
+            '0': 0, '0.5': 2, '1': 4, '1.5': 6, '2': 8, '2.5': 10,
+            '3': 12, '3.5': 14, '4': 16, '5': 20, '6': 24, '7': 28,
+            '8': 32, '9': 36, '10': 40, '11': 44, '12': 48,
+            '14': 56, '16': 64, '20': 80, '24': 96, '28': 112,
+            '32': 128, '36': 144, '40': 160, '44': 176, '48': 192
+        };
+
+        const code = `(async () => {
+const spacings = ${JSON.stringify(spacings)};
+const cols = await figma.variables.getLocalVariableCollectionsAsync();
+let col = cols.find(c => c.name === '${opts.collection}');
+if (!col) col = figma.variables.createVariableCollection('${opts.collection}');
+const modeId = col.modes[0].modeId;
+const existingVars = await figma.variables.getLocalVariablesAsync();
+let count = 0;
+for (const [name, value] of Object.entries(spacings)) {
+  const existing = existingVars.find(v => v.name === 'spacing/' + name);
+  if (!existing) {
+    const v = figma.variables.createVariable('spacing/' + name, col, 'FLOAT');
+    v.setValueForMode(modeId, value);
+    count++;
+  }
+}
+return 'Created ' + count + ' spacing variables';
+})()`;
+
+        try {
+            const result = await ctx.eval(code);
+            spinner.succeed(result || 'Created spacing scale');
+        } catch (error) {
+            spinner.fail('Failed to create spacing scale');
+        }
+    }
+}
+
+class TokensRadiiCommand extends Command {
+    name = 'tokens radii';
+    description = 'Create border radius scale';
+    options = [
+        { flags: '-c, --collection <name>', description: 'Collection name', defaultValue: 'Radii' }
+    ];
+
+    async execute(ctx, opts) {
+        const spinner = ora('Creating border radii...').start();
+        const radii = {
+            'none': 0, 'sm': 2, 'default': 4, 'md': 6, 'lg': 8,
+            'xl': 12, '2xl': 16, '3xl': 24, 'full': 9999
+        };
+
+        const code = `(async () => {
+const radii = ${JSON.stringify(radii)};
+const cols = await figma.variables.getLocalVariableCollectionsAsync();
+let col = cols.find(c => c.name === '${opts.collection}');
+if (!col) col = figma.variables.createVariableCollection('${opts.collection}');
+const modeId = col.modes[0].modeId;
+const existingVars = await figma.variables.getLocalVariablesAsync();
+let count = 0;
+for (const [name, value] of Object.entries(radii)) {
+  const existing = existingVars.find(v => v.name === 'radius/' + name);
+  if (!existing) {
+    const v = figma.variables.createVariable('radius/' + name, col, 'FLOAT');
+    v.setValueForMode(modeId, value);
+    count++;
+  }
+}
+return 'Created ' + count + ' radius variables';
+})()`;
+
+        try {
+            const result = await ctx.eval(code);
+            spinner.succeed(result || 'Created border radii');
+        } catch (error) {
+            spinner.fail('Failed to create radii');
+        }
+    }
+}
+
+class TokensImportCommand extends Command {
+    name = 'tokens import <file>';
+    description = 'Import tokens from JSON file';
+    options = [
+        { flags: '-c, --collection <name>', description: 'Collection name' }
+    ];
+
+    async execute(ctx, opts, file) {
+        let tokensData;
+        try {
+            tokensData = JSON.parse(readFileSync(file, 'utf8'));
+        } catch (error) {
+            ctx.logError(`Could not read file: ${file}`);
+            process.exit(1);
+        }
+
+        const spinner = ora('Importing tokens...').start();
+        const collectionName = opts.collection || 'Imported Tokens';
+
+        const code = `(async () => {
+const data = ${JSON.stringify(tokensData)};
+const collectionName = '${collectionName}';
+
+function hexToRgb(hex) {
+  const r = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);
+  if (!r) return null;
+  return { r: parseInt(r[1], 16) / 255, g: parseInt(r[2], 16) / 255, b: parseInt(r[3], 16) / 255 };
+}
+
+function detectType(value) {
+  if (typeof value === 'string' && value.startsWith('#')) return 'COLOR';
+  if (typeof value === 'number') return 'FLOAT';
+  if (typeof value === 'boolean') return 'BOOLEAN';
+  return 'STRING';
+}
+
+function flattenTokens(obj, prefix = '') {
+  const result = [];
+  for (const [key, val] of Object.entries(obj)) {
+    const name = prefix ? prefix + '/' + key : key;
+    if (val && typeof val === 'object' && !val.value && !val.type) {
+      result.push(...flattenTokens(val, name));
+    } else {
+      const value = val?.value ?? val;
+      const type = val?.type?.toUpperCase() || detectType(value);
+      result.push({ name, value, type });
+    }
+  }
+  return result;
+}
+
+const cols = await figma.variables.getLocalVariableCollectionsAsync();
+let col = cols.find(c => c.name === collectionName);
+if (!col) col = figma.variables.createVariableCollection(collectionName);
+const modeId = col.modes[0].modeId;
+
+const existingVars = await figma.variables.getLocalVariablesAsync();
+const tokens = flattenTokens(data);
+let count = 0;
+
+for (const { name, value, type } of tokens) {
+  const existing = existingVars.find(v => v.name === name);
+  if (!existing) {
+    try {
+      const figmaType = type === 'COLOR' ? 'COLOR' : type === 'FLOAT' || type === 'NUMBER' ? 'FLOAT' : type === 'BOOLEAN' ? 'BOOLEAN' : 'STRING';
+      const v = figma.variables.createVariable(name, col, figmaType);
+      let figmaValue = value;
+      if (figmaType === 'COLOR') figmaValue = hexToRgb(value);
+      if (figmaValue !== null) { v.setValueForMode(modeId, figmaValue); count++; }
+    } catch (e) {}
+  }
+}
+
+return 'Imported ' + count + ' tokens into ' + collectionName;
+})()`;
+
+        try {
+            const result = await ctx.eval(code);
+            spinner.succeed(result || 'Tokens imported');
+        } catch (error) {
+            spinner.fail('Failed to import tokens');
+            console.error(error.message);
+        }
+    }
+}
+
+export default [
+    new TokensTailwindCommand(),
+    new TokensShadcnCommand(),
+    new TokensPresetCommand(),
+    new TokensSpacingCommand(),
+    new TokensRadiiCommand(),
+    new TokensImportCommand(),
+];

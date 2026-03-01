@@ -127,6 +127,21 @@ export function getManualStartCommand() {
   }
 }
 
+export function stopDaemon() {
+  try {
+    if (existsSync(DAEMON_PID_FILE)) {
+      const pid = readFileSync(DAEMON_PID_FILE, 'utf8').trim();
+      try {
+        process.kill(parseInt(pid), 'SIGTERM');
+      } catch {}
+      unlinkSync(DAEMON_PID_FILE);
+    }
+    if (IS_MAC || IS_LINUX) {
+      execSync(`lsof -ti:${DAEMON_PORT} | xargs kill -9 2>/dev/null || true`, { stdio: 'pipe' });
+    }
+  } catch {}
+}
+
 export function startDaemon(force = false, mode = 'auto') {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const daemonPath = join(__dirname, '..', 'daemon.js');

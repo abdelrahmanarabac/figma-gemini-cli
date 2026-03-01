@@ -8,6 +8,28 @@
 import WebSocket from 'ws';
 import { getCdpPort } from '../figma-patch.js';
 
+export class FigmaConnectionError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'FigmaConnectionError';
+  }
+}
+
+export class FigmaRuntimeError extends Error {
+  constructor(message, details = null) {
+    super(message);
+    this.name = 'FigmaRuntimeError';
+    this.details = details;
+  }
+}
+
+export class FigmaSerializationError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'FigmaSerializationError';
+  }
+}
+
 export class FigmaClient {
   constructor() {
     this.ws = null;
@@ -41,6 +63,28 @@ export class FigmaClient {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Fetches the list of active CDP targets (pages) and identifies the Figma document
+   */
+  static async getActivePage(port) {
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/json`, { signal: AbortSignal.timeout(5000) });
+      if (!response.ok) return null;
+      const pages = await response.json();
+      return pages.find(p => p.url?.includes('figma.com/design') || p.url?.includes('figma.com/file')) || null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Check if Figma is currently connected (has an active page)
+   */
+  static async isConnected() {
+    const port = getCdpPort();
+    return !!(await this.getActivePage(port));
   }
 
   /**
@@ -141,10 +185,46 @@ export class FigmaClient {
     });
   }
 
-  send(method, params = {}) {
-    return new Promise((resolve) => {
+  send(method, params = {}, options = {}) {
+    return new Promise((resolve, reject) => {
+      if (!this.ws) return reject(new FigmaConnectionError('Not connected'));
+
+      const timeoutMs = options.timeout ?? 60000;
+      const signal = options.signal;
+
       const id = ++this.msgId;
-      this.callbacks.set(id, resolve);
+
+      let timeoutId;
+      let abortHandler;
+
+      const cleanup = () => {
+        this.callbacks.delete(id);
+        if (timeoutId) clearTimeout(timeoutId);
+        if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
+      };
+
+      timeoutId = setTimeout(() => {
+        cleanup();
+        reject(new FigmaConnectionError(`Timeout: ${method} exceeded ${timeoutMs}ms`));
+      }, timeoutMs);
+
+      if (signal) {
+        if (signal.aborted) {
+          cleanup();
+          return reject(new FigmaConnectionError('Operation aborted'));
+        }
+        abortHandler = () => {
+          cleanup();
+          reject(new FigmaConnectionError('Operation aborted'));
+        };
+        signal.addEventListener('abort', abortHandler);
+      }
+
+      this.callbacks.set(id, (msg) => {
+        cleanup();
+        resolve(msg);
+      });
+
       this.ws.send(JSON.stringify({ id, method, params }));
     });
   }
@@ -152,9 +232,9 @@ export class FigmaClient {
   /**
    * Evaluate JavaScript in the Figma context
    */
-  async eval(expression) {
+  async eval(expression, options = {}) {
     if (!this.ws) {
-      throw new Error('Not connected to Figma');
+      throw new FigmaConnectionError('Not connected to Figma');
     }
 
     const params = {
@@ -168,16 +248,51 @@ export class FigmaClient {
       params.contextId = this.executionContextId;
     }
 
-    const result = await this.send('Runtime.evaluate', params);
+    const result = await this.send('Runtime.evaluate', params, options);
 
     if (result.result?.exceptionDetails) {
       const error = result.result.exceptionDetails;
       // Get the actual error message - Figma puts detailed errors in exception.value
       const errorValue = error.exception?.value || error.exception?.description || error.text || 'Evaluation error';
-      throw new Error(errorValue);
+      throw new FigmaRuntimeError(errorValue, error);
     }
 
     return result.result?.result?.value;
+  }
+
+  /**
+   * Safe RPC pattern: Evaluate a function in Figma
+   * @template T
+   * @param {() => T | string} fn - Function or code string to evaluate
+   * @param {Object} [options={}] - Execution options { timeout, signal }
+   * @param {...any} args - Arguments to pass to the function
+   * @returns {Promise<T>}
+   */
+  async evaluateInFigma(fn, options = {}, ...args) {
+    if (!fn) {
+      throw new FigmaSerializationError('evaluateInFigma requires a function or expression string');
+    }
+
+    let code;
+    if (typeof fn === 'function') {
+      try {
+        if (args.length > 0) {
+          // JSON.stringify can throw if args contain circular references or BigInt
+          const serializedArgs = JSON.stringify(args);
+          code = `(${fn.toString()})(...${serializedArgs})`;
+        } else {
+          code = `(${fn.toString()})()`;
+        }
+      } catch (e) {
+        throw new FigmaSerializationError(`Failed to serialize arguments: ${e.message}`);
+      }
+    } else if (typeof fn === 'string') {
+      code = fn;
+    } else {
+      throw new FigmaSerializationError(`Invalid evaluation type: ${typeof fn}. Expected function or string.`);
+    }
+
+    return await this.eval(code, options);
   }
 
   /**

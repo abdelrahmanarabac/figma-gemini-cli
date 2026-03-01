@@ -14,260 +14,31 @@ import { FigJamClient } from './figjam-client.js';
 import { FigmaClient } from './core/figma-client.js';
 import { isPatched, patchFigma, unpatchFigma, getFigmaCommand, getCdpPort } from './figma-patch.js';
 
-// Daemon configuration
-const DAEMON_PORT = 3456;
-const DAEMON_PID_FILE = join(homedir(), '.figma-cli-daemon.pid');
-
-// Check if daemon is running
-function isDaemonRunning() {
-  try {
-    const response = execSync(`curl -s -o /dev/null -w "%{http_code}" http://localhost:${DAEMON_PORT}/health`, {
-      encoding: 'utf8',
-      stdio: 'pipe',
-      timeout: 1000
-    });
-    return response.trim() === '200';
-  } catch {
-    return false;
-  }
-}
-
-// Send command to daemon (uses native fetch in Node 18+)
-async function daemonExec(action, data = {}) {
-  const response = await fetch(`http://localhost:${DAEMON_PORT}/exec`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, ...data }),
-    signal: AbortSignal.timeout(60000)
-  });
-
-  const result = await response.json();
-  if (result.error) throw new Error(result.error);
-  return result.result;
-}
-
-// Fast eval via daemon (falls back to figma-use if all else fails)
-async function fastEval(code) {
-  // Try daemon first
-  if (isDaemonRunning()) {
-    try {
-      return await daemonExec('eval', { code });
-    } catch (e) {
-      // Continue to fallbacks
-    }
-  }
-
-  // Try direct connection
-  try {
-    const client = await getFigmaClient();
-    return await client.eval(code);
-  } catch (e) {
-    // Fall back to npx figma-use
-    const tempFile = '/tmp/figma-eval-' + Date.now() + '.js';
-    writeFileSync(tempFile, code);
-    try {
-      const output = execSync(`npx figma-use eval "$(cat ${tempFile})"`, {
-        encoding: 'utf8',
-        stdio: 'pipe',
-        timeout: 30000
-      });
-      unlinkSync(tempFile);
-      try {
-        return JSON.parse(output.trim());
-      } catch {
-        return output.trim();
-      }
-    } finally {
-      try { unlinkSync(tempFile); } catch {}
-    }
-  }
-}
-
-// Fast render via daemon (falls back to figma-use)
-async function fastRender(jsx) {
-  // Try daemon first
-  if (isDaemonRunning()) {
-    try {
-      return await daemonExec('render', { jsx });
-    } catch (e) {
-      // Continue to fallbacks
-    }
-  }
-
-  // Try direct connection
-  try {
-    const client = await getFigmaClient();
-    return await client.render(jsx);
-  } catch (e) {
-    // Fall back to npx figma-use
-    const { FigmaClient } = await import('./core/figma-client.js');
-    const tempClient = new FigmaClient();
-    const code = tempClient.parseJSX(jsx);
-
-    const tempFile = '/tmp/figma-render-' + Date.now() + '.js';
-    writeFileSync(tempFile, code);
-    try {
-      const output = execSync(`npx figma-use eval "$(cat ${tempFile})"`, {
-        encoding: 'utf8',
-        stdio: 'pipe',
-        timeout: 30000
-      });
-      unlinkSync(tempFile);
-      try {
-        return JSON.parse(output.trim());
-      } catch {
-        return { id: 'unknown', name: jsx.match(/name="([^"]+)"/)?.[1] || 'Frame' };
-      }
-    } finally {
-      try { unlinkSync(tempFile); } catch {}
-    }
-  }
-}
-
-// Start daemon in background
-function startDaemon(forceRestart = false, mode = 'auto') {
-  // If force restart, always kill existing daemon first
-  if (forceRestart) {
-    stopDaemon();
-    // Wait for port to be released
-    try { execSync('sleep 0.3', { stdio: 'pipe' }); } catch {}
-  } else if (isDaemonRunning()) {
-    return true; // Already running
-  }
-
-  const daemonScript = join(dirname(fileURLToPath(import.meta.url)), 'daemon.js');
-  const child = spawn('node', [daemonScript], {
-    detached: true,
-    stdio: 'ignore',
-    env: { ...process.env, DAEMON_PORT: String(DAEMON_PORT), DAEMON_MODE: mode }
-  });
-  child.unref();
-
-  // Save PID
-  writeFileSync(DAEMON_PID_FILE, String(child.pid));
-  return true;
-}
-
-// Stop daemon
-function stopDaemon() {
-  try {
-    if (existsSync(DAEMON_PID_FILE)) {
-      const pid = readFileSync(DAEMON_PID_FILE, 'utf8').trim();
-      try {
-        process.kill(parseInt(pid), 'SIGTERM');
-      } catch {}
-      unlinkSync(DAEMON_PID_FILE);
-    }
-    // Also try to kill by port
-    if (IS_MAC || IS_LINUX) {
-      execSync(`lsof -ti:${DAEMON_PORT} | xargs kill -9 2>/dev/null || true`, { stdio: 'pipe' });
-    }
-  } catch {}
-}
-
-// Platform detection
-const IS_WINDOWS = platform() === 'win32';
-const IS_MAC = platform() === 'darwin';
-const IS_LINUX = platform() === 'linux';
-
-// Platform-specific Figma paths and commands
-function getFigmaPath() {
-  if (IS_MAC) {
-    return '/Applications/Figma.app/Contents/MacOS/Figma';
-  } else if (IS_WINDOWS) {
-    const localAppData = process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local');
-    return join(localAppData, 'Figma', 'Figma.exe');
-  } else {
-    // Linux
-    return '/usr/bin/figma';
-  }
-}
-
-function startFigma() {
-  const port = getCdpPort(); // Fixed port 9222 for figma-use compatibility
-  const figmaPath = getFigmaPath();
-  if (IS_MAC) {
-    execSync(`open -a Figma --args --remote-debugging-port=${port}`, { stdio: 'pipe' });
-  } else if (IS_WINDOWS) {
-    spawn(figmaPath, [`--remote-debugging-port=${port}`], { detached: true, stdio: 'ignore' }).unref();
-  } else {
-    spawn(figmaPath, [`--remote-debugging-port=${port}`], { detached: true, stdio: 'ignore' }).unref();
-  }
-}
-
-function killFigma() {
-  try {
-    if (IS_MAC) {
-      execSync('pkill -x Figma 2>/dev/null || true', { stdio: 'pipe' });
-    } else if (IS_WINDOWS) {
-      execSync('taskkill /IM Figma.exe /F 2>nul', { stdio: 'pipe' });
-    } else {
-      execSync('pkill -x figma 2>/dev/null || true', { stdio: 'pipe' });
-    }
-  } catch (e) {
-    // Ignore errors if Figma wasn't running
-  }
-}
-
-function getManualStartCommand() {
-  const port = getCdpPort();
-  if (IS_MAC) {
-    return `open -a Figma --args --remote-debugging-port=${port}`;
-  } else if (IS_WINDOWS) {
-    return `"%LOCALAPPDATA%\\Figma\\Figma.exe" --remote-debugging-port=${port}`;
-  } else {
-    return `figma --remote-debugging-port=${port}`;
-  }
-}
+import { CliRouter } from './cli/router.js';
+import { StatusCommand } from './commands/status.js';
+import { isDaemonRunning, daemonExec, fastEval, fastRender, startDaemon, stopDaemon, getFigmaPath, startFigma, killFigma, getManualStartCommand, getFigmaClient, hexToRgb } from './utils/figma.js';
+import { loadConfig, saveConfig } from './utils/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const pkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
 
-const CONFIG_DIR = join(homedir(), '.figma-ds-cli');
-const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
+const router = new CliRouter('figma-ds-cli', pkg.version, pkg.description, {
+  config: { load: loadConfig, save: saveConfig },
+  getFigmaClient,
+  getCdpPort,
+  getActivePage: FigmaClient.getActivePage,
+  fastEval,
+  fastRender
+});
 
-const program = new Command();
+// Global alias for figmaEval since it's used throughout this file
+const figmaEval = fastEval;
+
+const program = router.legacyProgram;
+router.register(new StatusCommand());
 
 // Helper: Prompt user
-function prompt(question) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  return new Promise(resolve => rl.question(question, answer => { rl.close(); resolve(answer); }));
-}
-
-// Helper: Load config
-function loadConfig() {
-  try {
-    if (existsSync(CONFIG_FILE)) {
-      return JSON.parse(readFileSync(CONFIG_FILE, 'utf8'));
-    }
-  } catch {}
-  return {};
-}
-
-// Helper: Save config
-function saveConfig(config) {
-  if (!existsSync(CONFIG_DIR)) mkdirSync(CONFIG_DIR, { recursive: true });
-  writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2));
-}
-
-// Singleton FigmaClient instance
-let _figmaClient = null;
-
-// Helper: Get or create FigmaClient
-async function getFigmaClient() {
-  if (!_figmaClient) {
-    _figmaClient = new FigmaClient();
-    await _figmaClient.connect();
-  }
-  return _figmaClient;
-}
-
-// Helper: Run code in Figma (replaces figma-use eval)
-async function figmaEval(code) {
-  const client = await getFigmaClient();
-  return await client.eval(code);
-}
 
 // Sync wrapper for figmaEval - uses daemon via curl (fast) or fallback to direct connection
 // Removed duplicate/broken implementation. Use the async version above.
@@ -369,7 +140,7 @@ async function figmaUse(args, options = {}) {
 async function checkConnection() {
   // First check daemon (works for both CDP and Plugin modes)
   try {
-    const health = execSync(`curl -s http://127.0.0.1:${DAEMON_PORT}/health`, { encoding: 'utf8', timeout: 2000 });
+    const health = execSync(`curl -s http://127.0.0.1:${3456}/health`, { encoding: 'utf8', timeout: 2000 });
     const data = JSON.parse(health);
     if (data.status === 'ok' && (data.plugin || data.cdp)) {
       return true;
@@ -392,7 +163,7 @@ async function checkConnection() {
 function checkConnectionSync() {
   // First check daemon (works for both CDP and Plugin modes)
   try {
-    const health = execSync(`curl -s http://127.0.0.1:${DAEMON_PORT}/health`, { encoding: 'utf8', timeout: 2000 });
+    const health = execSync(`curl -s http://127.0.0.1:${3456}/health`, { encoding: 'utf8', timeout: 2000 });
     const data = JSON.parse(health);
     if (data.status === 'ok' && (data.plugin || data.cdp)) {
       return true;
@@ -419,27 +190,6 @@ function isFigmaPatched() {
   return config.patched === true;
 }
 
-// Helper: Hex to Figma RGB (handles both #RGB and #RRGGBB)
-function hexToRgb(hex) {
-  // Remove # if present
-  hex = hex.replace(/^#/, '');
-
-  // Expand 3-char hex to 6-char
-  if (hex.length === 3) {
-    hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
-  }
-
-  const result = /^([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  if (!result) {
-    throw new Error(`Invalid hex color: #${hex}`);
-  }
-  return {
-    r: parseInt(result[1], 16) / 255,
-    g: parseInt(result[2], 16) / 255,
-    b: parseInt(result[3], 16) / 255
-  };
-}
-
 // Helper: Smart positioning code (returns JS to get next free X position)
 function smartPosCode(gap = 100) {
   return `
@@ -451,11 +201,6 @@ if (children.length > 0) {
 }
 `;
 }
-
-program
-  .name('figma-ds-cli')
-  .description('CLI for managing Figma design systems')
-  .version(pkg.version);
 
 // Default action when no command is given
 program.action(async () => {
@@ -723,21 +468,7 @@ program
     execSync('figma-ds-cli init', { stdio: 'inherit' });
   });
 
-// ============ STATUS ============
 
-program
-  .command('status')
-  .description('Check connection to Figma')
-  .action(async () => {
-    // Check if first run
-    const config = loadConfig();
-    if (!config.patched) {
-      console.log(chalk.yellow('\n⚠ First time? Run the setup wizard:\n'));
-      console.log(chalk.cyan('  figma-ds-cli init\n'));
-      return;
-    }
-    figmaUse('status');
-  });
 
 // ============ UNPATCH ============
 
@@ -834,7 +565,7 @@ program
       for (let i = 0; i < 30; i++) {  // Wait up to 30 seconds
         await new Promise(r => setTimeout(r, 1000));
         try {
-          const healthRes = execSync(`curl -s http://127.0.0.1:${DAEMON_PORT}/health`, { encoding: 'utf8' });
+          const healthRes = execSync(`curl -s http://127.0.0.1:${3456}/health`, { encoding: 'utf8' });
           const health = JSON.parse(healthRes);
           if (health.plugin) {
             pluginSpinner.succeed('Plugin connected!');
@@ -912,7 +643,7 @@ program
     let connected = false;
     for (let i = 0; i < 8; i++) {
       await new Promise(r => setTimeout(r, 1000));
-      const result = figmaUse('status', { silent: true });
+      const result = await figmaUse('status', { silent: true });
       if (result && result.includes('Connected')) {
         spinner.succeed('Connected to Figma');
         console.log(chalk.gray(result.trim()));
@@ -1480,7 +1211,7 @@ daemon
   .description('Check if daemon is running')
   .action(async () => {
     if (isDaemonRunning()) {
-      console.log(chalk.green('✓ Daemon is running on port ' + DAEMON_PORT));
+      console.log(chalk.green('✓ Daemon is running on port ' + 3456));
     } else {
       console.log(chalk.yellow('○ Daemon is not running'));
       console.log(chalk.gray('  Run "figma-ds-cli connect" to start it automatically'));
@@ -1499,7 +1230,7 @@ daemon
     startDaemon();
     await new Promise(r => setTimeout(r, 1500));
     if (isDaemonRunning()) {
-      console.log(chalk.green('✓ Daemon started on port ' + DAEMON_PORT));
+      console.log(chalk.green('✓ Daemon started on port ' + 3456));
     } else {
       console.log(chalk.red('✗ Failed to start daemon'));
     }
@@ -1541,7 +1272,7 @@ daemon
     }
     console.log(chalk.blue('Reconnecting to Figma...'));
     try {
-      const response = await fetch(`http://localhost:${DAEMON_PORT}/reconnect`);
+      const response = await fetch(`http://localhost:${3456}/reconnect`);
       const result = await response.json();
       if (result.error) {
         console.log(chalk.red('✗ Reconnect failed: ' + result.error));
@@ -4495,7 +4226,7 @@ program
       const postProcessFixes = extractPostProcessFixes(jsx);
 
       // Use figma-use render directly - it has full JSX support
-      let cmd = 'figma-use render --stdin --json';
+      let cmd = 'npx figma-use render --stdin --json';
       if (options.parent) cmd += ` --parent "${options.parent}"`;
       if (posX !== undefined) cmd += ` --x ${posX}`;
       cmd += ` --y ${posY}`;
@@ -4529,9 +4260,14 @@ program
   .action(async (jsxArrayStr, options) => {
     await checkConnection();
     try {
-      const jsxArray = JSON.parse(jsxArrayStr);
+      let jsxArray;
+      if (jsxArrayStr.endsWith('.json') && existsSync(jsxArrayStr)) {
+        jsxArray = JSON.parse(readFileSync(jsxArrayStr, 'utf8'));
+      } else {
+        jsxArray = JSON.parse(jsxArrayStr);
+      }
       if (!Array.isArray(jsxArray)) {
-        throw new Error('Argument must be a JSON array of JSX strings');
+        throw new Error('Argument must be a JSON array of JSX strings or a path to a JSON file');
       }
 
       const gap = parseInt(options.gap) || 40;
@@ -4542,7 +4278,7 @@ program
 
       for (const jsx of jsxArray) {
         try {
-          const cmd = `figma-use render --stdin --json --x ${currentX} --y ${currentY}`;
+          const cmd = `npx figma-use render --stdin --json --x ${currentX} --y ${currentY}`;
           const output = execSync(cmd, {
             input: jsx,
             encoding: 'utf8',
