@@ -73,7 +73,21 @@ export class CliRouter {
       throw new Error(`Command "${commandInstance.constructor.name}" must extend Command.`);
     }
 
-    let cmd = this.program.command(commandInstance.name);
+    let cmd;
+    const parts = commandInstance.name.split(' ');
+    const rootName = parts[0];
+    const rest = parts.slice(1).join(' ');
+    const isSubcommand = rest && !rest.startsWith('<') && !rest.startsWith('[');
+
+    if (isSubcommand) {
+      let rootCmd = this.program.commands.find(c => c.name() === rootName);
+      if (!rootCmd) {
+        rootCmd = this.program.command(rootName);
+      }
+      cmd = rootCmd.command(rest);
+    } else {
+      cmd = this.program.command(commandInstance.name);
+    }
 
     if (commandInstance.description) {
       cmd.description(commandInstance.description);

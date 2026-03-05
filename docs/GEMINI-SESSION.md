@@ -1,14 +1,13 @@
-# Claude Session Quick Reference
+# Session Quick Reference
 
 ## Project Overview
 
 `figma-ds-cli` is a CLI tool for managing Figma design systems. It connects to Figma Desktop via Chrome DevTools Protocol and executes JavaScript against the Figma Plugin API.
 
-**Location:** `/Users/sil/claude/figma-cli`
 **npm package:** `figma-ds-cli` (v1.1.0)
 **GitHub:** https://github.com/silships/figma-cli
 
-## Key Commands for Claude
+## Key Commands
 
 ### Execute JavaScript in Figma
 
@@ -139,7 +138,7 @@ page.children.filter(n => n.name.startsWith('Stream-')).forEach((f, i) => {
 
 4. **Node IDs** are in format `PAGE:NODE` like `1:92`. Get them from query output.
 
-5. **Working directory** must be `/Users/sil/claude/figma-cli` to run commands.
+5. **Working directory** must be the `figma-cli` project root to run commands.
 
 ## File Structure
 
@@ -152,7 +151,7 @@ figma-cli/
     ├── ARCHITECTURE.md   # How it works
     ├── COMMANDS.md       # All commands
     ├── TECHNIQUES.md     # Advanced patterns
-    └── CLAUDE-SESSION.md # This file
+    └── GEMINI-SESSION.md # This file
 ```
 
 ## Current Session Context

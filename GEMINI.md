@@ -1,4 +1,4 @@
-# figma-ds-cli
+# figma-gemini-cli
 
 CLI that controls Figma Desktop directly. No API key needed.
 
@@ -23,7 +23,7 @@ CLI that controls Figma Desktop directly. No API key needed.
 ---
 
 ## Design Tokens
-
+ 
 "Add shadcn colors":
 ```bash
 node src/index.js tokens preset shadcn   # 244 primitives + 32 semantic (Light/Dark)

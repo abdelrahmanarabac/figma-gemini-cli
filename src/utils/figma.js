@@ -13,31 +13,48 @@ const IS_LINUX = platform() === 'linux';
 
 const DAEMON_PORT = 3456;
 const DAEMON_PID_FILE = join(homedir(), '.figma-cli-daemon.pid');
+const DAEMON_LOG_FILE = join(homedir(), '.figma-cli-daemon.log');
 
-export function isDaemonRunning() {
+export async function isDaemonRunning() {
   try {
-    const response = execSync(`curl -s -o /dev/null -w "%{http_code}" http://localhost:${DAEMON_PORT}/health`, {
-      encoding: 'utf8',
-      stdio: 'pipe',
-      timeout: 1000
+    const res = await fetch(`http://127.0.0.1:${DAEMON_PORT}/health`, {
+      signal: AbortSignal.timeout(500)
     });
-    return response.trim() === '200';
+    return res.status === 200;
   } catch {
     return false;
   }
 }
 
+export function cleanStaleDaemon() {
+  if (!existsSync(DAEMON_PID_FILE)) return;
+
+  const pid = parseInt(readFileSync(DAEMON_PID_FILE, 'utf8').trim(), 10);
+  if (pid) {
+    try {
+      // Sending signal 0 checks if the OS process is alive without killing it.
+      process.kill(pid, 0);
+      // If it IS alive but the HTTP health check failed, it's a zombie. Kill it.
+      process.kill(pid, 'SIGKILL');
+    } catch (e) {
+      // Process is dead (ESRCH), so we just safely proceed to cleanup.
+    }
+  }
+  // Remove the stale file
+  unlinkSync(DAEMON_PID_FILE);
+}
+
 export async function daemonExec(action, data = {}) {
-  const response = await fetch(`http://localhost:${DAEMON_PORT}/exec`, {
+  const response = await fetch(`http://localhost:${DAEMON_PORT}/command`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ action, ...data }),
+    body: JSON.stringify({ command: action, params: data }),
     signal: AbortSignal.timeout(60000)
   });
 
   const result = await response.json();
   if (result.error) throw new Error(result.error);
-  return result.result;
+  return result.data;
 }
 
 let _figmaClient = null;
@@ -52,7 +69,7 @@ export async function getFigmaClient() {
 
 export async function fastEval(code) {
   // Try daemon first
-  if (isDaemonRunning()) {
+  if (await isDaemonRunning()) {
     try {
       return await daemonExec('eval', { code });
     } catch (e) {
@@ -67,7 +84,7 @@ export async function fastEval(code) {
 
 export async function fastRender(jsx) {
   // Try daemon first
-  if (isDaemonRunning()) {
+  if (await isDaemonRunning()) {
     try {
       return await daemonExec('render', { jsx });
     } catch (e) {
@@ -112,7 +129,7 @@ export function killFigma() {
     } else {
       execSync('pkill -x figma 2>/dev/null || true', { stdio: 'pipe' });
     }
-  } catch (e) {}
+  } catch (e) { }
 }
 
 export function getManualStartCommand() {
@@ -128,34 +145,49 @@ export function getManualStartCommand() {
 }
 
 export function stopDaemon() {
+  cleanStaleDaemon();
   try {
-    if (existsSync(DAEMON_PID_FILE)) {
-      const pid = readFileSync(DAEMON_PID_FILE, 'utf8').trim();
-      try {
-        process.kill(parseInt(pid), 'SIGTERM');
-      } catch {}
-      unlinkSync(DAEMON_PID_FILE);
-    }
     if (IS_MAC || IS_LINUX) {
       execSync(`lsof -ti:${DAEMON_PORT} | xargs kill -9 2>/dev/null || true`, { stdio: 'pipe' });
     }
-  } catch {}
+  } catch { }
 }
 
-export function startDaemon(force = false, mode = 'auto') {
+export async function startDaemon(force = false, mode = 'auto') {
+  if (await isDaemonRunning() && !force) return;
+
+  // 1. Clean up any corrupted state before starting
+  cleanStaleDaemon();
+
   const __dirname = dirname(fileURLToPath(import.meta.url));
-  const daemonPath = join(__dirname, '..', 'daemon.js');
-  
-  if (isDaemonRunning() && !force) return;
+  const daemonPath = join(__dirname, '..', 'transport', 'daemon.js');
+
+  // 2. Open log file in append mode. Node OS layer handles writing seamlessly.
+  const { openSync } = await import('fs');
+  const logFd = openSync(DAEMON_LOG_FILE, 'a');
 
   const args = [daemonPath];
   if (mode === 'plugin') args.push('--plugin');
-  
+
+  // 3. Pass the log file descriptor to stdout and stderr
+  // Array format: [stdin, stdout, stderr]
   const proc = spawn('node', args, {
     detached: true,
-    stdio: 'ignore'
+    stdio: ['ignore', logFd, logFd]
   });
-  proc.unref();
+
+  proc.unref(); // Let CLI exit while daemon runs in background
+
+  // 4. Verification Loop (Simple polling)
+  const startTime = Date.now();
+  while (Date.now() - startTime < 5000) {
+    if (await isDaemonRunning()) {
+      return; // Success!
+    }
+    await new Promise(r => setTimeout(r, 250));
+  }
+
+  throw new Error(`Daemon failed to start. Check logs at: ${DAEMON_LOG_FILE}`);
 }
 
 export function hexToRgb(hex) {

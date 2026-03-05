@@ -11,9 +11,30 @@
 import { createServer } from 'http';
 import { WebSocketServer, WebSocket } from 'ws';
 import { FigmaClient } from './core/figma-client.js';
+import { writeFileSync, existsSync, unlinkSync } from 'fs';
+import { join } from 'path';
+import { homedir } from 'os';
 
 const PORT = parseInt(process.env.DAEMON_PORT) || 3456;
 const MODE = process.env.DAEMON_MODE || 'auto'; // 'auto', 'cdp', 'plugin'
+
+const DAEMON_PID_FILE = join(homedir(), '.figma-cli-daemon.pid');
+
+function cleanupAndExit() {
+  if (existsSync(DAEMON_PID_FILE)) {
+    unlinkSync(DAEMON_PID_FILE);
+  }
+  console.log(`[${new Date().toISOString()}] Daemon shutting down gracefully.`);
+  if (cdpClient) cdpClient.close();
+  if (pluginWs) pluginWs.close();
+  process.exit(0);
+}
+
+// Catch unhandled errors so they actually print to our log file
+process.on('uncaughtException', (err) => {
+  console.error(`[${new Date().toISOString()}] FATAL CRASH:`, err.stack);
+  cleanupAndExit();
+});
 
 // CDP Client (Yolo Mode)
 let cdpClient = null;
@@ -64,7 +85,7 @@ async function getCdpClient() {
   // WebSocket closed, need to reconnect
   if (cdpClient) {
     console.log('[daemon] CDP WebSocket closed, reconnecting...');
-    try { cdpClient.close(); } catch {}
+    try { cdpClient.close(); } catch { }
     cdpClient = null;
     lastHealthResult = false;
   }
@@ -184,7 +205,7 @@ async function handleRequest(req, res) {
   if (req.url === '/reconnect') {
     try {
       if (cdpClient) {
-        try { cdpClient.close(); } catch {}
+        try { cdpClient.close(); } catch { }
         cdpClient = null;
       }
       await getCdpClient();
@@ -251,7 +272,7 @@ async function handleRequest(req, res) {
           // Force reconnect before retry (CDP only)
           if (attempt < MAX_RETRIES && !isPluginConnected()) {
             console.log('[daemon] Reconnecting before retry...');
-            try { cdpClient.close(); } catch {}
+            try { cdpClient.close(); } catch { }
             cdpClient = null;
             await new Promise(r => setTimeout(r, 500));
           }
@@ -326,21 +347,30 @@ wss.on('connection', (ws) => {
   });
 });
 
-httpServer.listen(PORT, '127.0.0.1', () => {
-  console.log(`[daemon] Figma CLI daemon running on port ${PORT}`);
-  console.log(`[daemon] Mode: ${MODE === 'auto' ? 'auto (plugin preferred, CDP fallback)' : MODE}`);
-});
+try {
+  httpServer.listen(PORT, '127.0.0.1', () => {
+    writeFileSync(DAEMON_PID_FILE, process.pid.toString());
+    console.log(`[${new Date().toISOString()}] Daemon started with PID ${process.pid}`);
+    console.log(`[daemon] Figma CLI daemon running on port ${PORT}`);
+    console.log(`[daemon] Mode: ${MODE === 'auto' ? 'auto (plugin preferred, CDP fallback)' : MODE}`);
+  });
+
+  httpServer.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.error(`[${new Date().toISOString()}] Failed: Port ${PORT} is heavily held by another application.`);
+    } else {
+      console.error(`[${new Date().toISOString()}] Setup error:`, err);
+    }
+    cleanupAndExit();
+  });
+} catch (err) {
+  console.error(`[${new Date().toISOString()}] Failed to bootstrap daemon:`, err);
+  cleanupAndExit();
+}
 
 // Graceful shutdown
-process.on('SIGTERM', shutdown);
-process.on('SIGINT', shutdown);
-
-function shutdown() {
-  console.log('[daemon] Shutting down...');
-  if (cdpClient) cdpClient.close();
-  if (pluginWs) pluginWs.close();
-  httpServer.close(() => process.exit(0));
-}
+process.on('SIGTERM', cleanupAndExit);
+process.on('SIGINT', cleanupAndExit);
 
 // In auto/cdp mode, pre-connect to Figma
 if (MODE !== 'plugin') {

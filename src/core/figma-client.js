@@ -838,7 +838,7 @@ export class FigmaClient {
   }
 
   hexToRgbCode(hex) {
-    return `{r:${parseInt(hex.slice(1,3),16)/255},g:${parseInt(hex.slice(3,5),16)/255},b:${parseInt(hex.slice(5,7),16)/255}}`;
+    return `{r:${parseInt(hex.slice(1, 3), 16) / 255},g:${parseInt(hex.slice(3, 5), 16) / 255},b:${parseInt(hex.slice(5, 7), 16) / 255}}`;
   }
 
   // ============ Node Operations ============
@@ -3188,7 +3188,9 @@ export const Default: Story = {};
           };
         }
 
-        variable.setValueForMode(${JSON.stringify(modeId)}, val);
+        if (val !== null && val !== undefined) {
+          variable.setValueForMode(${JSON.stringify(modeId)}, val);
+        }
         return { success: true, variableId: variable.id, modeId: ${JSON.stringify(modeId)} };
       })()
     `);
@@ -3270,7 +3272,9 @@ export const Default: Story = {};
                 b: parseInt(hex.slice(4, 6), 16) / 255
               };
             }
-            variable.setValueForMode(col.defaultModeId, val);
+            if (val !== null && val !== undefined) {
+              variable.setValueForMode(col.defaultModeId, val);
+            }
           }
 
           // Set mode-specific values
@@ -3285,7 +3289,9 @@ export const Default: Story = {};
                   b: parseInt(hex.slice(4, 6), 16) / 255
                 };
               }
-              variable.setValueForMode(modeId, val);
+              if (val !== null && val !== undefined) {
+                variable.setValueForMode(modeId, val);
+              }
             }
           }
 
@@ -3324,7 +3330,9 @@ export const Default: Story = {};
             };
           }
 
-          variable.setValueForMode(u.modeId, val);
+          if (val !== null && val !== undefined) {
+            variable.setValueForMode(u.modeId, val);
+          }
           results.push({ variableId: u.variableId, success: true });
         }
 

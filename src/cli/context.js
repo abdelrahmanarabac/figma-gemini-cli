@@ -57,25 +57,52 @@ export class CommandContext {
   // ── Figma Execution ──────────────────────────────────
 
   /**
-   * Execute Figma Plugin API code. Primary execution path.
-   * Uses daemon if available, falls back to direct CDP.
+   * Execute Figma Plugin API code via structured command protocol.
+   * Routes through daemon → plugin 'eval' handler.
+   * Falls back to direct fastEval if daemon is unavailable.
    * @param {string} code - JavaScript code to evaluate in Figma
    * @returns {Promise<any>}
    */
   async eval(code) {
-    if (!this._deps.fastEval) throw new Error('fastEval dependency not injected');
-    return await this._deps.fastEval(code);
+    try {
+      const result = await this.command('eval', { code });
+      return result?.data;
+    } catch (e) {
+      // Fallback to legacy direct eval if daemon is down
+      if (this._deps.fastEval) {
+        return await this._deps.fastEval(code);
+      }
+      throw e;
+    }
   }
 
   /**
-   * Render JSX-like syntax in Figma.
-   * Uses daemon if available, falls back to direct CDP.
+   * Render JSX-like syntax in Figma via structured commands.
    * @param {string} jsx - JSX string to render
    * @returns {Promise<any>}
    */
   async render(jsx) {
-    if (!this._deps.fastRender) throw new Error('fastRender dependency not injected');
-    return await this._deps.fastRender(jsx);
+    const { parseJSX } = await import('../parser/jsx.js');
+    const { sendBatch } = await import('../transport/bridge.js');
+    const { commands, errors } = parseJSX(jsx);
+
+    if (commands.length === 0) {
+      throw new Error('Failed to parse JSX:\\n' + errors.join('\\n'));
+    }
+
+    return await sendBatch(commands);
+  }
+
+  /**
+   * Send a structured command to the Figma plugin.
+   * Safe, deterministic, batchable alternative to eval.
+   * @param {string} name - Command name
+   * @param {Object} params - Command parameters
+   * @returns {Promise<any>}
+   */
+  async command(name, params = {}) {
+    const { sendCommand } = await import('../transport/bridge.js');
+    return await sendCommand(name, params);
   }
 
   // ── Dependencies ─────────────────────────────────────

@@ -1,6 +1,6 @@
 # figma-ds-cli Command Reference
 
-Full command reference for the Figma CLI. For quick start, see CLAUDE.md.
+Full command reference for the Figma CLI. For quick start, see GEMINI.md.
 
 ## Design Tokens & Variables
 

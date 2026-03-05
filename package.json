@@ -22,7 +22,6 @@
     "type": "git",
     "url": "git+https://github.com/silships/figma-cli.git"
   },
-  "homepage": "https://intodesignsystems.com",
   "bugs": {
     "url": "https://github.com/silships/figma-cli/issues"
   },
@@ -30,6 +29,8 @@
     "node": ">=18"
   },
   "dependencies": {
+    "acorn": "^8.16.0",
+    "acorn-jsx": "^5.3.2",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
     "figma-use": "^0.13.1",

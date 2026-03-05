@@ -4,32 +4,32 @@ import chalk from 'chalk';
 import ora from 'ora';
 
 class VarListCommand extends Command {
-    name = 'var list';
-    description = 'List all variables';
+  name = 'var list';
+  description = 'List all variables';
 
-    async execute(ctx) {
-        const code = `(async () => {
+  async execute(ctx) {
+    const code = `(async () => {
 const vars = await figma.variables.getLocalVariablesAsync();
 if (vars.length === 0) return 'No variables found';
 return vars.map(v => v.resolvedType.padEnd(8) + ' ' + v.name).join('\\n');
 })()`;
-        const result = await ctx.eval(code);
-        if (result) console.log(result);
-    }
+    const result = await ctx.eval(code);
+    if (result) console.log(result);
+  }
 }
 
 class VarCreateCommand extends Command {
-    name = 'var create <name>';
-    description = 'Create a variable';
-    options = [
-        { flags: '-c, --collection <id>', description: 'Collection ID or name', required: true },
-        { flags: '-t, --type <type>', description: 'Type: COLOR, FLOAT, STRING, BOOLEAN', required: true },
-        { flags: '-v, --value <value>', description: 'Initial value' }
-    ];
+  name = 'var create <name>';
+  description = 'Create a variable';
+  options = [
+    { flags: '-c, --collection <id>', description: 'Collection ID or name', required: true },
+    { flags: '-t, --type <type>', description: 'Type: COLOR, FLOAT, STRING, BOOLEAN', required: true },
+    { flags: '-v, --value <value>', description: 'Initial value' }
+  ];
 
-    async execute(ctx, opts, name) {
-        const type = opts.type.toUpperCase();
-        const code = `(async () => {
+  async execute(ctx, opts, name) {
+    const type = opts.type.toUpperCase();
+    const code = `(async () => {
 const cols = await figma.variables.getLocalVariableCollectionsAsync();
 let col = cols.find(c => c.id === '${opts.collection}' || c.name === '${opts.collection}');
 if (!col) return 'Collection not found: ${opts.collection}';
@@ -46,40 +46,40 @@ let figmaValue = '${opts.value}';
 if ('${type}' === 'COLOR') figmaValue = hexToRgb('${opts.value}');
 else if ('${type}' === 'FLOAT') figmaValue = parseFloat('${opts.value}');
 else if ('${type}' === 'BOOLEAN') figmaValue = '${opts.value}' === 'true';
-v.setValueForMode(modeId, figmaValue);
+if (figmaValue !== null && figmaValue !== undefined) { try { v.setValueForMode(modeId, figmaValue); } catch(e) {} }
 ` : ''}
 return 'Created ${type.toLowerCase()} variable: ${name}';
 })()`;
-        const result = await ctx.eval(code);
-        if (result) console.log(result);
-    }
+    const result = await ctx.eval(code);
+    if (result) console.log(result);
+  }
 }
 
 class VarFindCommand extends Command {
-    name = 'var find <pattern>';
-    description = 'Find variables by name pattern';
+  name = 'var find <pattern>';
+  description = 'Find variables by name pattern';
 
-    async execute(ctx, opts, pattern) {
-        const code = `(async () => {
+  async execute(ctx, opts, pattern) {
+    const code = `(async () => {
 const vars = await figma.variables.getLocalVariablesAsync();
 const matches = vars.filter(v => v.name.toLowerCase().includes('${pattern.toLowerCase()}'));
 if (matches.length === 0) return 'No variables matching "${pattern}"';
 return matches.map(v => v.resolvedType.padEnd(8) + ' ' + v.name).join('\\n');
 })()`;
-        const result = await ctx.eval(code);
-        if (result) console.log(result);
-    }
+    const result = await ctx.eval(code);
+    if (result) console.log(result);
+  }
 }
 
 class VarVisualizeCommand extends Command {
-    name = 'var visualize [collection]';
-    description = 'Create color swatches on canvas (shadcn-style layout)';
+  name = 'var visualize [collection]';
+  description = 'Create color swatches on canvas (shadcn-style layout)';
 
-    async execute(ctx, opts, collection) {
-        const spinner = ora('Creating color palette...').start();
+  async execute(ctx, opts, collection) {
+    const spinner = ora('Creating color palette...').start();
 
-        // This is a long eval — the visualize code generates Figma frames with bound variables
-        const code = `(async () => {
+    // This is a long eval — the visualize code generates Figma frames with bound variables
+    const code = `(async () => {
 await figma.loadFontAsync({ family: 'Inter', style: 'Medium' });
 await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
 
@@ -221,32 +221,32 @@ figma.viewport.scrollAndZoomIntoView(figma.currentPage.children.slice(-filteredC
 return 'Created ' + totalSwatches + ' color swatches';
 })()`;
 
-        try {
-            const result = await ctx.eval(code);
-            spinner.succeed(result || 'Created color palette');
-        } catch (error) {
-            spinner.fail('Failed to create palette');
-            console.error(chalk.red(error.message));
-        }
+    try {
+      const result = await ctx.eval(code);
+      spinner.succeed(result || 'Created color palette');
+    } catch (error) {
+      spinner.fail('Failed to create palette');
+      console.error(chalk.red(error.message));
     }
+  }
 }
 
 class VarCreateBatchCommand extends Command {
-    name = 'var create-batch <json>';
-    description = 'Create multiple variables at once (faster than individual calls)';
-    options = [
-        { flags: '-c, --collection <id>', description: 'Collection ID or name', required: true }
-    ];
+  name = 'var create-batch <json>';
+  description = 'Create multiple variables at once (faster than individual calls)';
+  options = [
+    { flags: '-c, --collection <id>', description: 'Collection ID or name', required: true }
+  ];
 
-    async execute(ctx, opts, json) {
-        let vars;
-        try { vars = JSON.parse(json); } catch {
-            ctx.logError('Invalid JSON. Expected: [{"name": "color/red", "type": "COLOR", "value": "#ff0000"}, ...]');
-            return;
-        }
-        if (!Array.isArray(vars)) { ctx.logError('Expected JSON array'); return; }
+  async execute(ctx, opts, json) {
+    let vars;
+    try { vars = JSON.parse(json); } catch {
+      ctx.logError('Invalid JSON. Expected: [{"name": "color/red", "type": "COLOR", "value": "#ff0000"}, ...]');
+      return;
+    }
+    if (!Array.isArray(vars)) { ctx.logError('Expected JSON array'); return; }
 
-        const code = `(async () => {
+    const code = `(async () => {
 const vars = ${JSON.stringify(vars)};
 const cols = await figma.variables.getLocalVariableCollectionsAsync();
 let col = cols.find(c => c.id === '${opts.collection}' || c.name === '${opts.collection}');
@@ -267,32 +267,34 @@ for (const v of vars) {
     if (type === 'COLOR') figmaValue = hexToRgb(v.value);
     else if (type === 'FLOAT') figmaValue = parseFloat(v.value);
     else if (type === 'BOOLEAN') figmaValue = v.value === true || v.value === 'true';
-    variable.setValueForMode(modeId, figmaValue);
+    if (figmaValue !== null && figmaValue !== undefined) {
+      try { variable.setValueForMode(modeId, figmaValue); } catch(e) {}
+    }
   }
   created++;
 }
 return 'Created ' + created + ' variables';
 })()`;
 
-        const result = await ctx.eval(code);
-        ctx.logSuccess(result || `Created ${vars.length} variables`);
-    }
+    const result = await ctx.eval(code);
+    ctx.logSuccess(result || `Created ${vars.length} variables`);
+  }
 }
 
 class VarDeleteAllCommand extends Command {
-    name = 'var delete-all';
-    description = 'Delete all local variables and collections';
-    options = [
-        { flags: '-c, --collection <name>', description: 'Only delete variables in this collection' }
-    ];
+  name = 'var delete-all';
+  description = 'Delete all local variables and collections';
+  options = [
+    { flags: '-c, --collection <name>', description: 'Only delete variables in this collection' }
+  ];
 
-    async execute(ctx, opts) {
-        const spinner = ora('Deleting variables...').start();
-        const filterCode = opts.collection
-            ? `cols = cols.filter(c => c.name.includes('${opts.collection}'));`
-            : '';
+  async execute(ctx, opts) {
+    const spinner = ora('Deleting variables...').start();
+    const filterCode = opts.collection
+      ? `cols = cols.filter(c => c.name.includes('${opts.collection}'));`
+      : '';
 
-        const code = `(async () => {
+    const code = `(async () => {
 let cols = await figma.variables.getLocalVariableCollectionsAsync();
 ${filterCode}
 let deleted = 0;
@@ -305,43 +307,43 @@ for (const col of cols) {
 return 'Deleted ' + deleted + ' variables and ' + cols.length + ' collections';
 })()`;
 
-        try {
-            const result = await ctx.eval(code);
-            spinner.succeed(result);
-        } catch (error) {
-            spinner.fail('Failed to delete variables');
-            console.error(chalk.red(error.message));
-        }
+    try {
+      const result = await ctx.eval(code);
+      spinner.succeed(result);
+    } catch (error) {
+      spinner.fail('Failed to delete variables');
+      console.error(chalk.red(error.message));
     }
+  }
 }
 
 // ── Collections ─────────────────────────────────────
 
 class ColListCommand extends Command {
-    name = 'col list';
-    description = 'List all variable collections';
+  name = 'col list';
+  description = 'List all variable collections';
 
-    async execute(ctx) {
-        const code = `(async () => {
+  async execute(ctx) {
+    const code = `(async () => {
 const cols = await figma.variables.getLocalVariableCollectionsAsync();
 if (cols.length === 0) return 'No collections found';
 return cols.map(c => c.id + ' ' + c.name + ' (' + c.modes.map(m => m.name).join(', ') + ')').join('\\n');
 })()`;
-        const result = await ctx.eval(code);
-        if (result) console.log(result);
-    }
+    const result = await ctx.eval(code);
+    if (result) console.log(result);
+  }
 }
 
 class ColCreateCommand extends Command {
-    name = 'col create <name>';
-    description = 'Create a variable collection';
-    options = [
-        { flags: '-m, --modes <modes>', description: 'Comma-separated mode names (e.g., "Light,Dark")' }
-    ];
+  name = 'col create <name>';
+  description = 'Create a variable collection';
+  options = [
+    { flags: '-m, --modes <modes>', description: 'Comma-separated mode names (e.g., "Light,Dark")' }
+  ];
 
-    async execute(ctx, opts, name) {
-        const modes = opts.modes ? opts.modes.split(',').map(m => m.trim()) : [];
-        const code = `(async () => {
+  async execute(ctx, opts, name) {
+    const modes = opts.modes ? opts.modes.split(',').map(m => m.trim()) : [];
+    const code = `(async () => {
 const col = figma.variables.createVariableCollection('${name}');
 ${modes.length > 0 ? `
 const modes = ${JSON.stringify(modes)};
@@ -350,18 +352,18 @@ for (let i = 1; i < modes.length; i++) { col.addMode(modes[i]); }
 ` : ''}
 return 'Created collection: ' + col.name + ' (id: ' + col.id + ')';
 })()`;
-        const result = await ctx.eval(code);
-        if (result) console.log(result);
-    }
+    const result = await ctx.eval(code);
+    if (result) console.log(result);
+  }
 }
 
 export default [
-    new VarListCommand(),
-    new VarCreateCommand(),
-    new VarFindCommand(),
-    new VarVisualizeCommand(),
-    new VarCreateBatchCommand(),
-    new VarDeleteAllCommand(),
-    new ColListCommand(),
-    new ColCreateCommand(),
+  new VarListCommand(),
+  new VarCreateCommand(),
+  new VarFindCommand(),
+  new VarVisualizeCommand(),
+  new VarCreateBatchCommand(),
+  new VarDeleteAllCommand(),
+  new ColListCommand(),
+  new ColCreateCommand(),
 ];

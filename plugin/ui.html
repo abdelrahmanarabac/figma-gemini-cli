@@ -14,15 +14,9 @@
       padding: 10px 12px;
       gap: 4px;
     }
-    .row {
-      display: flex;
-      align-items: center;
-      gap: 6px;
-    }
+    .row { display: flex; align-items: center; gap: 6px; }
     .dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
+      width: 8px; height: 8px; border-radius: 50%;
       background: #666;
     }
     .dot.connecting { background: #f59e0b; animation: pulse 1s infinite; }
@@ -38,7 +32,7 @@
   </style>
 </head>
 <body>
-  <div class="title">Figma DS CLI</div>
+  <div class="title">FigCli v2</div>
   <div class="row">
     <div id="dot" class="dot connecting"></div>
     <span id="status">Connecting...</span>
@@ -46,7 +40,6 @@
   <div class="hint">Keep this window open</div>
 
   <script>
-    // Scan ports 3456-3460 (like figma-console-mcp scans 9223-9232)
     const PORTS = [3456, 3457, 3458, 3459, 3460];
     let currentPortIndex = 0;
     let ws = null;
@@ -71,36 +64,22 @@
         ws.onopen = () => {
           setStatus('Connected', 'connected');
           currentPortIndex = 0;
-
-          // Notify plugin main thread
           parent.postMessage({ pluginMessage: { type: 'connected' } }, '*');
-
-          // Send hello
-          ws.send(JSON.stringify({
-            type: 'hello',
-            mode: 'plugin',
-            version: '1.0.0'
-          }));
+          ws.send(JSON.stringify({ type: 'hello', mode: 'plugin', version: '2.0.0' }));
         };
 
         ws.onmessage = (event) => {
           try {
             const msg = JSON.parse(event.data);
 
-            if (msg.action === 'eval') {
-              // Forward eval request to plugin main thread
-              parent.postMessage({
-                pluginMessage: {
-                  type: 'eval',
-                  id: msg.id,
-                  code: msg.code
-                }
-              }, '*');
-            }
-
+            // Ping/pong heartbeat
             if (msg.action === 'ping') {
               ws.send(JSON.stringify({ type: 'pong', id: msg.id }));
+              return;
             }
+
+            // Forward all other messages to plugin
+            parent.postMessage({ pluginMessage: msg }, '*');
           } catch (e) {
             console.error('Message parse error:', e);
           }
@@ -109,18 +88,13 @@
         ws.onclose = () => {
           setStatus('Reconnecting...', 'connecting');
           parent.postMessage({ pluginMessage: { type: 'disconnected' } }, '*');
-
-          // Reconnect after 2 seconds (start from first port)
           currentPortIndex = 0;
           clearTimeout(reconnectTimer);
           reconnectTimer = setTimeout(connect, 2000);
         };
 
-        ws.onerror = (error) => {
+        ws.onerror = () => {
           setStatus('Scanning...', 'connecting');
-          console.error('WebSocket error:', error);
-
-          // Try next port
           currentPortIndex = (currentPortIndex + 1) % PORTS.length;
           clearTimeout(reconnectTimer);
           reconnectTimer = setTimeout(connect, 500);
@@ -129,33 +103,29 @@
       } catch (e) {
         setStatus('Error', 'error');
         parent.postMessage({ pluginMessage: { type: 'error', message: e.message } }, '*');
-
-        // Try next port
         currentPortIndex = (currentPortIndex + 1) % PORTS.length;
         clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(connect, 500);
       }
     }
 
-    // Receive results from plugin main thread
+    // Receive results from plugin main thread → send to daemon
     window.onmessage = (event) => {
       const msg = event.data.pluginMessage;
       if (!msg) return;
 
       if (msg.type === 'result') {
-        // Send result back to CLI via WebSocket
         if (ws && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             type: 'result',
             id: msg.id,
             result: msg.result,
-            error: msg.error
+            error: msg.error,
           }));
         }
       }
     };
 
-    // Start connection
     connect();
   </script>
 </body>
