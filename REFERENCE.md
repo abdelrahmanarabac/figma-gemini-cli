@@ -1,267 +1,226 @@
-# figma-ds-cli Command Reference
+# Command Reference
 
-Full command reference for the Figma CLI. For quick start, see GEMINI.md.
+The `figma-ds-cli` provides an extensive suite of commands manipulating the Figma workspace, design tokens, and FigJam boards.
 
-## Design Tokens & Variables
+---
 
-### Create Design Systems
+## 1. Setup & Connection
 
-```bash
-node src/index.js tokens ds              # IDS Base colors
-node src/index.js tokens tailwind        # Tailwind 22 color families (242 vars)
-node src/index.js tokens spacing         # Spacing tokens
+Establish an authenticated bridge to the native Figma application.
+
+### Start the Proxy
+```powershell
+# Autonomously configures CDP routing (Requires Full Disk Access on MacOS)
+node src/index.js connect
+
+# Bridge via the manual Figma Plugin interface
+node src/index.js connect --safe
 ```
 
-### Manage Variables
-
-```bash
-node src/index.js var list               # Show all variables
-node src/index.js var list -t COLOR      # Filter by type
-node src/index.js var visualize          # Show colors on canvas
-node src/index.js var create "name" -c "ColId" -t COLOR -v "#3b82f6"
+### Validate and Diagnose
+```powershell
+node src/index.js status
+node src/index.js daemon status
+node src/index.js daemon restart
 ```
 
-### Bind Variables
+---
 
-```bash
+## 2. Variables & Design Tokens
+
+Inject, manage, and audit variable definitions seamlessly.
+
+### Provision Token Libraries
+```powershell
+# Base UI framework primitives
+node src/index.js tokens ds
+
+# Full 242-color Tailwind palette
+node src/index.js tokens tailwind
+
+# Predefined geometric spacing values
+node src/index.js tokens spacing
+
+# Standardized border corner radii constraints
+node src/index.js tokens radii
+```
+
+### Manage Variable Collections
+```powershell
+# Enumerate all accessible variables
+node src/index.js var list
+
+# Search for a distinct variable format
+node src/index.js var find "primary/*"
+
+# Create a variable procedurally
+node src/index.js var create "primary/500" -c "CollectionId" -t COLOR -v "#3b82f6"
+
+# Create a new collection block
+node src/index.js col create "Semantic Colors"
+```
+
+### Bind Extracted Variables
+Apply existing design tokens against specific structural elements.
+
+```powershell
 node src/index.js bind fill "primary/500"
-node src/index.js bind stroke "border/default"
-node src/index.js bind radius "radius/md"
 node src/index.js bind gap "spacing/md"
-node src/index.js bind padding "spacing/lg"
-node src/index.js bind list              # List available variables
+node src/index.js bind radius "radius/sm"
+
+# Apply specifically to targeted Layer IDs
+node src/index.js bind padding "spacing/lg" -n "ID1" "ID2"
 ```
 
-## Create Elements
+---
 
-### Quick Primitives
+## 3. Element Creation & Layout
 
-```bash
+Construct primitive vector shapes or deploy robust semantic AST templates directly on the canvas.
+
+### Generate Simple Primitives
+```powershell
+# Commands can be executed securely in PowerShell environments
 node src/index.js create rect "Card" -w 320 -h 200 --fill "#fff" --radius 12
-node src/index.js create circle "Avatar" -w 48 --fill "#3b82f6"
-node src/index.js create text "Hello" -s 24 -c "#000" -w bold
-node src/index.js create line -l 200 -c "#e4e4e7"
-node src/index.js create autolayout "Card" -d col -g 16 -p 24 --fill "#fff"
+node src/index.js create text "Welcome" -s 24 -c "#000" -w bold
 node src/index.js create icon lucide:star -s 24 -c "#f59e0b"
-node src/index.js create image "https://example.com/photo.png" -w 200
-node src/index.js create group "Header"
-node src/index.js create component "Button"
+node src/index.js create image "https://example.com/placeholder.png" -w 400
+node src/index.js create autolayout "Stack" -d col -g 16 -p 24
 ```
 
-### Render with JSX
-
-```bash
-node src/index.js render '<Frame name="Card" w={320} h={180} bg="#fff" rounded={16} flex="col" gap={8} p={24}>
-  <Text size={20} weight="bold" color="#111">Title</Text>
-  <Text size={14} color="#666" w="fill">Description</Text>
-</Frame>'
+### Render Expressive JSX
+Leverages the robust parser mapping declarative attributes to their native Figma API equivalents. Use multiple lines or save to a variable to avoid syntax errors inside PowerShell.
+```powershell
+node src/index.js render "<Frame w={320} h={180} bg=\"#fff\" flex=\"col\" p={24}>
+  <Text size={20} weight=\"bold\" color=\"#222\">Success Alert</Text>
+</Frame>"
 ```
 
-### Render Batch (Multiple Frames)
-
-```bash
+### Iterative Multi-Frame Renders
+```powershell
 node src/index.js render-batch '[
-  "<Frame name=\"Card 1\" w={300} h={200} bg=\"#fff\"><Text>Card 1</Text></Frame>",
-  "<Frame name=\"Card 2\" w={300} h={200} bg=\"#fff\"><Text>Card 2</Text></Frame>"
+  "<Frame name=\"First_Child\" w={300} h={200} bg=\"#fff\"><Text>1</Text></Frame>",
+  "<Frame name=\"Second_Child\" w={300} h={200} bg=\"#fff\"><Text>2</Text></Frame>"
 ]' -d row -g 40
 ```
 
-Options: `-d row|col` (direction), `-g <n>` (gap)
+---
 
-## Modify Elements
+## 4. Query & Mutation Operations
 
-```bash
-node src/index.js set fill "#3b82f6"           # Change fill
-node src/index.js set fill "#3b82f6" -n "1:234" # On specific node
-node src/index.js set stroke "#e4e4e7" -w 1    # Add stroke
-node src/index.js set radius 12                # Corner radius
-node src/index.js set size 320 200             # Resize
-node src/index.js set pos 100 100              # Move
-node src/index.js set opacity 0.5              # Opacity
-node src/index.js set autolayout row -g 8 -p 16 # Apply auto-layout
-node src/index.js set name "Header"            # Rename
-```
+Search, mutate, or organize existing document structures.
 
-## Layout & Sizing
+### Selectors
+```powershell
+# Retrieve properties of an explicitly targeted Node ID
+node src/index.js get "1:234"
 
-```bash
-node src/index.js sizing hug                   # Hug contents
-node src/index.js sizing fill                  # Fill container
-node src/index.js sizing fixed 320 200         # Fixed size
-node src/index.js padding 16                   # All sides
-node src/index.js padding 16 24                # Vertical, horizontal
-node src/index.js gap 16                       # Set gap
-node src/index.js align center                 # Align items
-```
-
-## Find & Select
-
-```bash
-node src/index.js find "Button"                # Find by name
-node src/index.js find "Card" -t FRAME         # Filter by type
-node src/index.js select "1:234"               # Select node
-node src/index.js get                          # Get selection props
-node src/index.js get "1:234"                  # Get specific node
-```
-
-## Canvas Operations
-
-```bash
-node src/index.js canvas info                  # What's on canvas
-node src/index.js canvas next                  # Next free position
-node src/index.js arrange -g 100               # Arrange frames
-node src/index.js arrange -g 100 -c 3          # 3 columns
-```
-
-## Duplicate & Delete
-
-```bash
-node src/index.js duplicate                    # Duplicate selection
-node src/index.js dup "1:234" --offset 50      # With offset
-node src/index.js delete                       # Delete selection
-node src/index.js delete "1:234"               # Delete by ID
-```
-
-## Node Operations
-
-```bash
-node src/index.js node tree                    # Show tree structure
-node src/index.js node tree "1:234" -d 5       # Deeper depth
-node src/index.js node bindings                # Show variable bindings
-node src/index.js node to-component "1:234"    # Convert to component
-node src/index.js node delete "1:234"          # Delete by ID
-```
-
-## Export
-
-```bash
-node src/index.js export css                   # Variables as CSS
-node src/index.js export tailwind              # Tailwind config
-node src/index.js export screenshot -o out.png # Screenshot
-node src/index.js export-jsx "1:234"           # Export as JSX
-node src/index.js export-jsx "1:234" -o Card.jsx --pretty
-node src/index.js export-storybook "1:234"     # Storybook stories
-```
-
-## Analysis & Linting
-
-```bash
-node src/index.js lint                         # Check all rules
-node src/index.js lint --fix                   # Auto-fix
-node src/index.js lint --rule color-contrast   # Specific rule
-node src/index.js lint --preset accessibility  # Use preset
-node src/index.js analyze colors               # Color usage
-node src/index.js analyze typography           # Typography
-node src/index.js analyze spacing              # Spacing
-node src/index.js analyze clusters             # Find patterns
-```
-
-Lint rules: `no-default-names`, `no-deeply-nested`, `no-empty-frames`, `prefer-auto-layout`, `no-hardcoded-colors`, `color-contrast`, `touch-target-size`, `min-text-size`
-
-Presets: `recommended`, `strict`, `accessibility`, `design-system`
-
-## XPath Queries
-
-```bash
+# Query the tree using an XPath syntax simulation
 node src/index.js raw query "//FRAME"
-node src/index.js raw query "//COMPONENT"
+node src/index.js raw query "//GROUP[@name='content']"
 node src/index.js raw query "//*[contains(@name, 'Button')]"
-node src/index.js raw select "1:234"
-node src/index.js raw export "1:234" --scale 2
+
+node src/index.js raw select "1:234,1:235"
 ```
 
-## Website Recreation
-
-```bash
-node src/index.js recreate-url "https://example.com" --name "My Page"
-node src/index.js recreate-url "https://example.com" -w 375 -h 812  # Mobile
-node src/index.js analyze-url "https://example.com" --screenshot
-node src/index.js screenshot-url "https://example.com" --full
+### Geometric Modifications
+```powershell
+node src/index.js set fill "#3b82f6" -n "1:234"
+node src/index.js set autolayout row -g 8 -p 16 -n "1:234"
+node src/index.js set pos 100 100
+node src/index.js sizing hug
+node src/index.js align center
 ```
 
-## Images
+### Organizational Hygiene
+```powershell
+# Grid arrangement
+node src/index.js arrange -g 100 -c 3
 
-```bash
-node src/index.js create image "https://example.com/photo.png"
-node src/index.js screenshot-url "https://example.com"
-node src/index.js remove-bg                    # Remove background (needs API key)
+node src/index.js node tree "1:234" -d 5
+node src/index.js node to-component "1:234"
+node src/index.js node delete "1:234"
 ```
 
-## FigJam
+---
 
-```bash
-node src/index.js fj list                      # List pages
-node src/index.js fj sticky "Text" -x 100 -y 100 --color "#FEF08A"
-node src/index.js fj shape "Label" -x 200 -y 100 -w 200 -h 100
-node src/index.js fj connect "ID1" "ID2"       # Connect elements
-node src/index.js fj nodes                     # Show elements
-node src/index.js fj delete "ID"
-node src/index.js fj eval "figma.currentPage.children.length"
+## 5. Exports & Static Analysis
+
+Generate assets, CSS mappings, and evaluate semantic design rules.
+
+### Exporters
+```powershell
+# Pixel asset extraction
+node src/index.js export screenshot -o view.png
+node src/index.js raw export "1:234" --scale 2 --suffix "_dark"
+
+# Style extraction
+node src/index.js export css
+node src/index.js export tailwind
+
+# Component JSX extraction
+node src/index.js export-jsx "1:234" -o ExportedCard.jsx --pretty
 ```
 
-Shape types: `ROUNDED_RECTANGLE`, `RECTANGLE`, `ELLIPSE`, `DIAMOND`, `TRIANGLE_UP`, `TRIANGLE_DOWN`, `PARALLELOGRAM_RIGHT`, `PARALLELOGRAM_LEFT`
-
-## JavaScript Eval
-
-```bash
-node src/index.js eval "figma.currentPage.name"
-node src/index.js eval --file /tmp/script.js
-node src/index.js run /tmp/script.js
+### Auditing
+```powershell
+node src/index.js lint
+node src/index.js lint --fix
+node src/index.js analyze colors
+node src/index.js analyze spacing
 ```
 
-## Render JSX Syntax
+---
 
-**Elements:** `<Frame>`, `<Rectangle>`, `<Ellipse>`, `<Text>`, `<Line>`, `<Image>`, `<SVG>`, `<Icon>`
+## 6. FigJam Support
 
-**Size:** `w={320} h={200}`, `w="fill"`, `minW={100} maxW={500}`
+FigJam implements a distinct subset of the Plugin API that demands separate abstractions.
 
-**Layout:** `flex="row|col"`, `gap={16}`, `wrap={true}`, `justify="start|center|end|between"`, `items="start|center|end"`
+```powershell
+# Find active boards
+node src/index.js fj list
 
-**Padding:** `p={24}`, `px={16} py={8}`, `pt={8} pr={16} pb={8} pl={16}`
+# Interactively draw standard elements
+node src/index.js fj sticky "Meeting Note" -x 100 -y 100 --color "#FEF08A"
+node src/index.js fj shape "Process Step" -x 200 -y 100 -w 200 -h 100 --type DIAMOND
+node src/index.js fj text "Header" -x 100 -y 400 --size 32
 
-**Appearance:** `bg="#fff"`, `stroke="#000"`, `strokeWidth={1}`, `opacity={0.5}`
-
-**Corners:** `rounded={16}`, `roundedTL={8}`, `overflow="hidden"`
-
-**Effects:** `shadow="0 4 12 #0001"`, `blur={10}`, `rotate={45}`
-
-**Text:** `<Text size={18} weight="bold" color="#000" font="Inter">Hello</Text>`
-
-**WRONG vs RIGHT:**
-```
-layout="horizontal"  →  flex="row"
-padding={24}         →  p={24}
-fill="#fff"          →  bg="#fff"
-cornerRadius={12}    →  rounded={12}
+# Operations mapped strictly to the connected FigJam workspace
+node src/index.js fj connect "2:30" "2:34"
+node src/index.js fj move "2:30" 500 500
+node src/index.js fj update "2:30" "Re-written content"
+node src/index.js fj delete "2:30"
 ```
 
-## JSX Parser Rules & Troubleshooting
+*Note: In FigJam, operations that define `text` inputs internally block on rendering cycles securely until internal fonts (`Inter`) are dynamically downloaded by the host system.*
 
-The parser is a lightweight implementation. Follow these rules to avoid "Invalid JSX" errors:
+---
 
-1. **No Comments**: Never use JSX comments (`{/* ... */}`) inside the render string.
-2. **Standard Shadows**: Keep `shadow` strings simple. Avoid complex multi-layered shadows in a single string.
-3. **Prop Types**: Always use curly braces for numbers (`w={100}`) and quotes for strings (`name="Card"`).
-4. **No Logic**: Do not use ternary operators or JavaScript expressions inside the JSX. It only supports static props.
-5. **Closing Tags**: Every element must be properly closed (e.g., `<Frame />` or `<Frame>...</Frame>`).
-6. **Flat Colors**: Use hex codes (`#ffffff`) or variable names. Avoid `rgba()` if possible as it can be sensitive to spacing.
+## 7. Advanced JavaScript Techniques
 
-## Advanced Examples
+Deploy complex logic directly inside the Figma application by stringifying functions.
 
-### Switch to Dark Mode
+### Switching Modes for Bound Library Variables
+This function traces local bound nodes safely back to external library definitions for Mode Swapping (e.g., Light to Dark).
+
 ```javascript
-node src/index.js eval "
-const node = figma.getNodeById('1:234');
+// file: switch-mode.js
+const nodeIds = ['1:92', '1:112'];
+
 function findModeCollection(n) {
   if (n.boundVariables) {
     for (const [prop, binding] of Object.entries(n.boundVariables)) {
       const b = Array.isArray(binding) ? binding[0] : binding;
       if (b && b.id) {
-        const variable = figma.variables.getVariableById(b.id);
-        if (variable) {
-          const col = figma.variables.getVariableCollectionById(variable.variableCollectionId);
-          if (col && col.modes.length > 1) return { col, modes: col.modes };
-        }
+        try {
+          const variable = figma.variables.getVariableById(b.id);
+          if (variable) {
+            const col = figma.variables.getVariableCollectionById(variable.variableCollectionId);
+            if (col && col.modes.length > 1) {
+              return { col, modes: col.modes };
+            }
+          }
+        } catch(e) {}
       }
     }
   }
@@ -273,31 +232,42 @@ function findModeCollection(n) {
   }
   return null;
 }
-const found = findModeCollection(node);
+
+const targetNode = figma.getNodeById(nodeIds[0]);
+const found = findModeCollection(targetNode);
+
 if (found) {
-  const darkMode = found.modes.find(m => m.name.includes('Dark'));
-  if (darkMode) node.setExplicitVariableModeForCollection(found.col, darkMode.modeId);
+  const lightMode = found.modes.find(m => m.name.includes('Light'));
+  if (lightMode) {
+    nodeIds.forEach(id => {
+      const n = figma.getNodeById(id);
+      if (n) {
+        n.setExplicitVariableModeForCollection(found.col, lightMode.modeId);
+      }
+    });
+  }
 }
-"
 ```
 
-### Create Component Instance
-```javascript
-node src/index.js eval "(function() {
-  const comp = figma.currentPage.findOne(n => n.type === 'COMPONENT' && n.name === 'Button');
-  if (!comp) return 'Component not found';
-  const instance = comp.createInstance();
-  instance.x = 100;
-  instance.y = 100;
-  return instance.id;
-})()"
+```powershell
+# Execute the logic script
+node src/index.js run switch-mode.js
 ```
 
-### Smart Positioning
+### Proportional Vector Sub-Tree Scaling
+Using native `.rescale()` retains corner and path relations. Calling `.resize()` improperly scales internal group constraints.
 ```javascript
-let smartX = 0;
-figma.currentPage.children.forEach(n => { smartX = Math.max(smartX, n.x + n.width); });
-smartX += 100;
-const frame = figma.createFrame();
-frame.x = smartX;
+// file: rescale.js
+const n = figma.getNodeById('1:223');
+n.rescale(1.5);
+
+// Maintain explicit bounding coordinates after scale operations
+const frameW = 1920, frameH = 1080;
+n.x = (frameW - n.width) / 2;
+n.y = (frameH - n.height) / 2;
+```
+
+```powershell
+# Run the script via the CLI
+node src/index.js run rescale.js
 ```

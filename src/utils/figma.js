@@ -45,7 +45,7 @@ export function cleanStaleDaemon() {
 }
 
 export async function daemonExec(action, data = {}) {
-  const response = await fetch(`http://localhost:${DAEMON_PORT}/command`, {
+  const response = await fetch(`http://127.0.0.1:${DAEMON_PORT}/command`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command: action, params: data }),

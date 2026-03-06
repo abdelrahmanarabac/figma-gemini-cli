@@ -1,403 +1,140 @@
-# figma-gemini-cli
+# Figma CLI - Developer & AI Reference
 
-CLI that controls Figma Desktop directly. No API key needed.
-
-## Quick Reference
-
-| User says | Command |
-|-----------|---------|
-| "connect to figma" | `node src/index.js connect` |
-| "add tailwind colors" | `node src/index.js tokens tailwind` |
-| "show colors on canvas" | `node src/index.js var visualize` |
-| "create cards/buttons" | `render-batch` + `node to-component` |
-| "create a rectangle/frame" | `node src/index.js render '<Frame>...'` |
-| "convert to component" | `node src/index.js node to-component "ID"` |
-| "list variables" | `node src/index.js var list` |
-| "find nodes named X" | `node src/index.js find "X"` |
-| "what's on canvas" | `node src/index.js canvas info` |
-| "export as PNG/SVG" | `node src/index.js export png` |
-
-**Full command reference:** See REFERENCE.md
-
----
-
-## Design Tokens
-
-
-"Add tailwind colors":
-```bash
-node src/index.js tokens tailwind        # 242 primitive colors only
-```
-
-"Create design system":
-```bash
-node src/index.js tokens ds              # IDS Base colors
-```
-
-**shadcn vs tailwind:**
-- `tokens preset shadcn` = Full shadcn system (primitives + semantic tokens with Light/Dark mode)
-- `tokens tailwind` = Just the Tailwind color palette (primitives only)
-
-"Delete all variables":
-```bash
-node src/index.js var delete-all                    # All collections
-node src/index.js var delete-all -c "primitives"    # Only specific collection
-```
-
-**Note:** `var list` only SHOWS existing variables. Use `tokens` commands to CREATE them.
+This document serves as the primary system prompt and operational guide for interacting with `figma-ds-cli`. It outlines connection routines, available commands, design token specifications, and crucial requirements for generating JSX structures that render reliably inside Figma.
 
 ---
 
 ## Connection Modes
 
+The CLI must establish a connection before performing any canvas operations.
+
 ### Yolo Mode (Recommended)
-Patches Figma once, then connects directly. Fully automatic.
-```bash
+Automatically connects via Chrome DevTools Protocol (CDP).
+```powershell
 node src/index.js connect
 ```
 
 ### Safe Mode
-Uses plugin, no Figma modification. Start plugin each session.
-```bash
+Requires launching the local plugin first (Plugins → Development → FigCli).
+```powershell
 node src/index.js connect --safe
 ```
-Then: Plugins → Development → FigCli
 
----
 
-## Creating Components
+## Quick Actions & Basic Usage
 
-When user asks to "create cards", "design buttons":
+| Action | Command |
+| ------ | ------- |
+| Establish connection | `node src/index.js connect` |
+| View current selection | `node src/index.js canvas info` |
+| Generate a rectangle | `node src/index.js render '<Frame bg="#111" w={200} h={100}></Frame>'` |
+| Group to a component | `node src/index.js node to-component "NODE_ID"` |
+| Find an exact node | `node src/index.js find 'TargetName'` |
 
-1. **Each component = separate frame** (NOT inside parent gallery)
-2. **Convert to component** after creation
-3. **Use variables** for colors
+*Note: For all deep-dive commands, consult [`REFERENCE.md`](REFERENCE.md).*
 
-```bash
-# Step 1: Create separately
+
+## Design Tokens
+
+Use design tokens rather than hardcoded colors whenever possible.
+
+```powershell
+# Load Tailwind CSS color palette (242 colors)
+node src/index.js tokens tailwind
+
+# Load primary design system variables
+node src/index.js tokens ds
+
+# Display all tokens physically on the Figma canvas
+node src/index.js var visualize
+```
+
+*Note: `var list` displays existing variables. You must run one of the `tokens` commands above to actually inject them.*
+
+
+## Creating Components & Workflows
+
+When implementing structural designs (e.g., Cards, Buttons, Form Inputs):
+
+1. **Keep components independent**: Render top-level frames separately.
+2. **Convert immediately to components**: Run the `to-component` command targeting the generated Node IDs.
+3. **Bind tokens externally**: Apply exact fill, stroke, and layout styles using variable binding.
+
+**Example Workflow:**
+
+```powershell
+# 1. Render UI Elements
 node src/index.js render-batch '[
-  "<Frame name=\"Card 1\" w={320} h={200} bg=\"#18181b\" rounded={12} flex=\"col\" p={24}><Text color=\"#fff\">Title</Text></Frame>",
-  "<Frame name=\"Card 2\" w={320} h={200} bg=\"#18181b\" rounded={12} flex=\"col\" p={24}><Text color=\"#fff\">Title</Text></Frame>"
+  "<Frame name=\"TestButton1\" w={120} h={40} bg=\"#fff\" rounded={8}></Frame>",
+  "<Frame name=\"TestButton2\" w={120} h={40} bg=\"#fff\" rounded={8}></Frame>"
 ]'
 
-# Step 2: Convert
+# 2. Convert raw frames into distinct Figma Components
 node src/index.js node to-component "ID1" "ID2"
 
-# Step 3: Bind variables
+# 3. Bind styling variables programmatically
 node src/index.js bind fill "zinc/900" -n "ID1"
 ```
 
----
 
-## Creating Webpages
+## JSX Rendering Syntactic Rules
 
-Create ONE parent frame with vertical auto-layout containing all sections:
+The AST evaluating parser converts JSX-like inputs directly into Figma native API shapes. 
 
-```bash
-node src/index.js render '<Frame name="Landing Page" w={1440} flex="col" bg="#0a0a0f">
-  <Frame name="Hero" w="fill" h={800} flex="col" justify="center" items="center" gap={24} p={80}>
-    <Text size={64} weight="bold" color="#fff">Headline</Text>
-    <Frame bg="#3b82f6" px={32} py={16} rounded={8}><Text color="#fff">CTA</Text></Frame>
-  </Frame>
-  <Frame name="Features" w="fill" flex="row" gap={40} p={80} bg="#111">
-    <Frame flex="col" gap={12} grow={1}><Text size={24} weight="bold" color="#fff">Feature 1</Text></Frame>
-  </Frame>
-</Frame>'
+### Supported Elements
+`<Frame>`, `<Rectangle>`, `<Ellipse>`, `<Text>`, `<Line>`, `<Image>`, `<SVG>`, `<Icon>`
+
+### Essential Properties
+
+- **Layout & Positioning**: 
+  - `flex="row"` or `flex="col"` (Auto Layout)
+  - `gap={16}`, `wrap={true}`
+  - `justify="start|center|end|between"`
+  - `items="start|center|end"`
+- **Dimensions**:
+  - `w={300} h={200}` (Absolute)
+  - `w="fill" h="fill"` (Responsive)
+- **Padding**:
+  - `p={24}` (All)
+  - `px={16} py={8}` (Symmetrical)
+  - `pt={4} pr={8} pb={4} pl={8}` (Individual)
+- **Styling**:
+  - `bg="#0a0a0f"`, `stroke="#333"`, `opacity={0.8}`
+  - `rounded={12}`, `shadow="0 4 12 #00000040"`
+
+### Critical Pitfalls to Avoid
+
+> [!WARNING]
+> **Text Wrapping Failures**
+> Without explicitly setting `w="fill"`, Text nodes evaluate linearly and clip dynamically resizing layouts. 
+> *Ensure both the parent `<Frame>` AND the `<Text>` components apply `w="fill"` bindings!*
+
+> [!WARNING]
+> **Legacy Configuration Syntax**
+> Never pass raw unmapped Figma API enumerators. 
+> **Wrong**: `layout="horizontal"`, `padding={24}`, `cornerRadius={12}`
+> **Correct**: `flex="row"`, `p={24}`, `rounded={12}`
+
+
+## Executing JavaScript Directly
+
+Direct evaluation (`eval`) pushes logic immediately inside the Figma VM. You must utilize the built-in Plugin API (`figma.*`).
+
+```powershell
+# Inline Evaluation
+node src/index.js eval "console.log('Document Name: ' + figma.root.name);"
+
+# Complex execution from a local file
+node src/index.js run script.js
 ```
 
----
+### Known limitations of the Evaluation Context
+- The `eval` execution inherently runs silently. To log or retrieve output, explicitly call `return` or `console.log`, then query the state utilizing standard command wrappers.
+- Use `rescale(factor)` when resizing complex hierarchies, as manual `resize()` can fracture inner layer relationships.
 
-## JSX Syntax (render command)
 
-```jsx
-// Layout
-flex="row"              // or "col"
-gap={16}                // spacing between items
-p={24}                  // padding all sides
-px={16} py={8}          // padding x/y
-pt={8} pr={16} pb={8} pl={16}  // individual padding
+## Modifying Library Variables (Modes)
 
-// Alignment
-justify="center"        // main axis: start, center, end, between
-items="center"          // cross axis: start, center, end
+Swapping Dark/Light modes on variables native to linked external libraries involves querying a node's internal `boundVariables` list, tracing the parent collection's configurations, and enforcing the explicit mode override. 
 
-// Size
-w={320} h={200}         // fixed size
-w="fill" h="fill"       // fill parent
-minW={100} maxW={500}   // constraints
-minH={50} maxH={300}
-
-// Appearance
-bg="#fff"               // fill color (or var:Name)
-stroke="#000"           // stroke color
-strokeWidth={2}         // stroke thickness
-strokeAlign="inside"    // inside, outside, center
-opacity={0.8}           // 0..1
-blendMode="multiply"    // multiply, overlay, etc.
-
-// Corners
-rounded={16}            // all corners
-roundedTL={8} roundedTR={8} roundedBL={0} roundedBR={0}  // individual
-cornerSmoothing={0.6}   // iOS squircle (0..1)
-
-// Effects
-shadow="4px 4px 12px rgba(0,0,0,0.25)"  // drop shadow
-blur={8}                // layer blur
-overflow="hidden"       // clip content
-rotate={45}             // rotation degrees
-
-// Text
-<Text size={18} weight="bold" color="#000" font="Inter">Hello</Text>
-```
-
-### Auto-Layout
-
-```jsx
-// Wrap: items flow to next row when full
-wrap={true}             // layoutWrap = 'WRAP'
-rowGap={12}             // gap between rows (counterAxisSpacing)
-
-// Grow: expand to fill remaining space
-grow={1}                // layoutGrow = 1
-
-// Stretch: fill cross-axis
-stretch={true}          // layoutAlign = 'STRETCH'
-
-// Absolute: position freely within parent
-position="absolute" x={12} y={12}  // must have name for x/y to work
-```
-
-**Complete example:**
-```bash
-node src/index.js render '<Frame name="Card" w={300} flex="col" bg="#18181b" rounded={12} overflow="hidden">
-  <Frame w="fill" h={100} bg="#333" />
-  <Frame name="Badge" w={40} h={20} bg="#ef4444" rounded={4} position="absolute" x={12} y={12} />
-  <Frame name="Tags" flex="row" wrap={true} rowGap={8} gap={8} p={16}>
-    <Frame w={60} h={24} bg="#3b82f6" rounded={12} />
-    <Frame w={70} h={24} bg="#22c55e" rounded={12} />
-    <Frame w={80} h={24} bg="#a855f7" rounded={12} />
-  </Frame>
-  <Frame flex="row" p={16} gap={8}>
-    <Frame w={40} h="fill" bg="#222" />
-    <Frame h="fill" bg="#333" grow={1} />
-  </Frame>
-</Frame>'
-```
-
-**Common mistakes (silently ignored, no error!):**
-```
-WRONG                    RIGHT
-layout="horizontal"   →  flex="row"
-padding={24}          →  p={24}
-fill="#fff"           →  bg="#fff"
-cornerRadius={12}     →  rounded={12}
-fontSize={18}         →  size={18}
-fontWeight="bold"     →  weight="bold"
-justify="between"     →  use grow={1} spacer instead
-```
-
-### Layout Patterns
-
-**Push items to edges (navbar pattern):**
-```jsx
-// justify="between" doesn't work reliably, use grow spacer instead
-<Frame flex="row" items="center">
-  <Frame>Logo</Frame>
-  <Frame grow={1} justify="center">Nav Links</Frame>
-  <Frame>Buttons</Frame>
-</Frame>
-```
-
-**Badge at avatar corner:**
-```jsx
-// Absolute x/y is relative to parent padding
-// Avatar at padding=24, size=100, badge=20
-// Position: padding + avatarSize - badgeSize/2 = 24 + 100 - 10 = 114
-<Frame p={24}>
-  <Frame w={100} h={100} rounded={50} />
-  <Frame name="Badge" w={20} h={20} position="absolute" x={114} y={114} />
-</Frame>
-```
-
-**Input at bottom (chat pattern):**
-```jsx
-<Frame flex="col" h={400}>
-  <Frame>Message 1</Frame>
-  <Frame>Message 2</Frame>
-  <Frame grow={1} />
-  <Frame>Input field</Frame>
-</Frame>
-```
-
-**Avoid content overflow:**
-```jsx
-// BAD: fixed height too small for auto-sized children
-<Frame h={160} p={24}><Frame h={139} /></Frame>  // 139+48 > 160!
-
-// GOOD: ensure height fits content + padding
-<Frame h={200} p={24}><Frame h={139} /></Frame>  // 139+48 < 200 ✓
-```
-
-**Complete card example:**
-```bash
-node src/index.js render '<Frame name="Card" w={320} h={200} bg="#18181b" rounded={12} flex="col" p={24} gap={12}>
-  <Text size={18} weight="bold" color="#fff">Title</Text>
-  <Text size={14} color="#a1a1aa" w="fill">Description text</Text>
-  <Frame bg="#3b82f6" px={16} py={8} rounded={6}>
-    <Text size={14} weight="medium" color="#fff">Button</Text>
-  </Frame>
-</Frame>'
-```
-
-### Common Pitfalls
-
-**1. Text gets cut off (CRITICAL):**
-```jsx
-// BAD: Text without w="fill" will be single line and clip
-<Frame flex="col" gap={8}>
-  <Text size={16} weight="semibold" color="#fff">Title cut off</Text>
-  <Text size={14} color="#a1a1aa">Description also cut off...</Text>
-</Frame>
-
-// GOOD: Add w="fill" to parent Frame AND ALL Text elements
-<Frame flex="col" gap={8} w="fill">
-  <Text size={16} weight="semibold" color="#fff" w="fill">Title wraps properly</Text>
-  <Text size={14} color="#a1a1aa" w="fill">Description wraps properly.</Text>
-</Frame>
-```
-**Rule:** For text to wrap, you need:
-1. Parent frame with `w="fill"` or fixed width
-2. **EVERY** Text element needs `w="fill"` (not just descriptions!)
-3. Parent must have `flex="col"` or `flex="row"`
-
-**IMPORTANT:** ALL text that could wrap needs `w="fill"`:
-- Titles (e.g., "Wireless Noise-Canceling Headphones")
-- Descriptions
-- Labels
-- Any multi-word text
-
-**Real example - card with title AND description:**
-```jsx
-<Frame name="Card" w={340} bg="#18181b" rounded={16} flex="col" p={20} gap={16}>
-  <Frame flex="col" gap={8} w="fill">
-    <Text size={16} weight="semibold" color="#fff" w="fill">Wireless Noise-Canceling Headphones</Text>
-    <Text size={14} color="#a1a1aa" w="fill">Premium audio experience with 40-hour battery life.</Text>
-  </Frame>
-</Frame>
-```
-
-**2. Toggle switches - use flex, not absolute:**
-```jsx
-// BAD: Absolute positioning for knob
-<Frame w={52} h={28} bg="#3b82f6" rounded={14} p={2}>
-  <Frame w={24} h={24} bg="#fff" rounded={12} position="absolute" x={26} y={2} />
-</Frame>
-
-// GOOD: Flex with justify for ON/OFF state
-// ON state (knob right)
-<Frame w={52} h={28} bg="#3b82f6" rounded={14} flex="row" items="center" p={2} justify="end">
-  <Frame w={24} h={24} bg="#fff" rounded={12} />
-</Frame>
-// OFF state (knob left)
-<Frame w={52} h={28} bg="#27272a" rounded={14} flex="row" items="center" p={2} justify="start">
-  <Frame w={24} h={24} bg="#52525b" rounded={12} />
-</Frame>
-```
-
-**3. Buttons need flex for centered text:**
-```jsx
-// BAD: No flex, text not centered
-<Frame bg="#3b82f6" px={16} py={10} rounded={10}>
-  <Text>Button</Text>
-</Frame>
-
-// GOOD: Flex centers content
-<Frame bg="#3b82f6" px={16} py={10} rounded={10} flex="row" justify="center" items="center">
-  <Text>Button</Text>
-</Frame>
-```
-
-**4. No emojis - use shapes as icons:**
-```jsx
-// BAD: Emojis render inconsistently
-<Text>🏠</Text>
-
-// GOOD: Use shapes as icon placeholders
-<Frame w={20} h={20} rounded={4} stroke="#fff" strokeWidth={2} />  // square icon
-<Frame w={20} h={20} rounded={10} stroke="#fff" strokeWidth={2} /> // circle icon
-```
-
-**5. Three-dot menu icon:**
-```jsx
-<Frame flex="row" gap={3} justify="center" items="center">
-  <Frame w={4} h={4} bg="#52525b" rounded={2} />
-  <Frame w={4} h={4} bg="#52525b" rounded={2} />
-  <Frame w={4} h={4} bg="#52525b" rounded={2} />
-</Frame>
-```
-
-**6. Star rating with shapes:**
-```jsx
-<Frame flex="row" gap={4}>
-  <Frame w={14} h={14} bg="#fbbf24" rounded={2} />
-  <Frame w={14} h={14} bg="#fbbf24" rounded={2} />
-  <Frame w={14} h={14} bg="#fbbf24" rounded={2} />
-  <Frame w={14} h={14} bg="#fbbf24" rounded={2} />
-  <Frame w={14} h={14} bg="#fbbf24" rounded={2} />
-</Frame>
-```
-
----
-
-## Key Rules
-
-1. **Always use `render` for frames** - has smart positioning
-2. **Never use `eval` to create** - no positioning, overlaps at (0,0)
-3. **Never use `npx figma-use render`** - no smart positioning
-4. **For multiple frames:** Use `render-batch`
-5. **Convert to components:** `node to-component` after creation
-
----
-
-## Onboarding ("Initiate Project")
-
-**Never show terminal commands to users.** Run silently, give friendly feedback.
-
-1. Run `npm install` silently
-2. Ask connection mode (Yolo or Safe)
-3. Run `node src/index.js connect` (or `--safe`)
-4. When connected, say: "Connected! What would you like to create?"
-
-If permission error (macOS): System Settings → Privacy → Full Disk Access → Add Terminal
-
----
-
-## Variable Visualization
-
-"Show colors on canvas" / "display variables" / "create palette":
-```bash
-node src/index.js var visualize              # All collections
-node src/index.js var visualize "primitives" # Filter
-```
-
-Creates shadcn-style color swatches bound to variables.
-
----
-
-## Website Recreation
-
-```bash
-node src/index.js recreate-url "https://example.com" --name "Page"
-node src/index.js screenshot-url "https://example.com"
-```
-
----
-
-## Speed Daemon
-
-`connect` auto-starts daemon for 10x faster commands.
-
-```bash
-node src/index.js daemon status
-node src/index.js daemon restart
-```
+Refer to [`REFERENCE.md`](REFERENCE.md#advanced-javascript-techniques) for the fully compliant snippet necessary to programmatically toggle these mode configurations safely.
