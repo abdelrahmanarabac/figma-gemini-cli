@@ -7,7 +7,6 @@ CLI that controls Figma Desktop directly. No API key needed.
 | User says | Command |
 |-----------|---------|
 | "connect to figma" | `node src/index.js connect` |
-| "add shadcn colors" | `node src/index.js tokens preset shadcn` |
 | "add tailwind colors" | `node src/index.js tokens tailwind` |
 | "show colors on canvas" | `node src/index.js var visualize` |
 | "create cards/buttons" | `render-batch` + `node to-component` |
@@ -23,11 +22,7 @@ CLI that controls Figma Desktop directly. No API key needed.
 ---
 
 ## Design Tokens
- 
-"Add shadcn colors":
-```bash
-node src/index.js tokens preset shadcn   # 244 primitives + 32 semantic (Light/Dark)
-```
+
 
 "Add tailwind colors":
 ```bash

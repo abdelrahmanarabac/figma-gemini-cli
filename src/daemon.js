@@ -285,6 +285,63 @@ async function handleRequest(req, res) {
     return;
   }
 
+  // Structured command protocol
+  if (req.url === '/command' && req.method === 'POST') {
+    let body = '';
+    req.on('data', chunk => body += chunk);
+    req.on('end', async () => {
+      try {
+        const { command, params } = JSON.parse(body);
+        const id = ++pluginMsgId;
+
+        const execWithTimeout = (fn) => Promise.race([
+          fn(),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Command timeout')), 60000))
+        ]);
+
+        let result;
+
+        if (isPluginConnected()) {
+          // Route through plugin WebSocket
+          result = await execWithTimeout(() => new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              pluginPendingRequests.delete(id);
+              reject(new Error('Plugin command timeout'));
+            }, 30000);
+
+            pluginPendingRequests.set(id, { resolve, reject, timeout });
+
+            pluginWs.send(JSON.stringify({
+              action: 'command',
+              id,
+              command,
+              params: params || {}
+            }));
+          }));
+        } else {
+          // Route through CDP eval — serialize command as plugin message
+          const code = `
+            (async () => {
+              const handlers = figma.ui.__handlers || {};
+              // Dispatch through plugin's command handler
+              const msg = { action: 'command', command: '${command}', params: ${JSON.stringify(params || {})} };
+              figma.ui.postMessage(msg);
+              return { status: 'dispatched' };
+            })()
+          `;
+          result = await execWithTimeout(() => evalViaCdp(code));
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ok', data: result }));
+      } catch (error) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: error.message }));
+      }
+    });
+    return;
+  }
+
   res.writeHead(404);
   res.end('Not found');
 }

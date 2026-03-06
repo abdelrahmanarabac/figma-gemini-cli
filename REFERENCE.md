@@ -235,6 +235,17 @@ fill="#fff"          →  bg="#fff"
 cornerRadius={12}    →  rounded={12}
 ```
 
+## JSX Parser Rules & Troubleshooting
+
+The parser is a lightweight implementation. Follow these rules to avoid "Invalid JSX" errors:
+
+1. **No Comments**: Never use JSX comments (`{/* ... */}`) inside the render string.
+2. **Standard Shadows**: Keep `shadow` strings simple. Avoid complex multi-layered shadows in a single string.
+3. **Prop Types**: Always use curly braces for numbers (`w={100}`) and quotes for strings (`name="Card"`).
+4. **No Logic**: Do not use ternary operators or JavaScript expressions inside the JSX. It only supports static props.
+5. **Closing Tags**: Every element must be properly closed (e.g., `<Frame />` or `<Frame>...</Frame>`).
+6. **Flat Colors**: Use hex codes (`#ffffff`) or variable names. Avoid `rgba()` if possible as it can be sensitive to spacing.
+
 ## Advanced Examples
 
 ### Switch to Dark Mode

@@ -119,13 +119,23 @@ function transformPropValue(key, value) {
  * @param {string} jsxString - JSX design DSL
  * @returns {{ commands: object[], errors: string[] }}
  */
-export function parseJSX(jsxString) {
+export function parseJSX(jsxString, idPrefix = "") {
     const errors = [];
+
+    // Pre-process JSX to handle unquoted attributes (common when CLI args strip quotes)
+    // 1. Wrap unquoted booleans in {}
+    let processed = jsxString.replace(/([a-zA-Z0-9_-]+)=(true|false)(?=\s|>|\/|$)/g, '$1={$2}');
+    // 2. Wrap unquoted numbers in {}
+    processed = processed.replace(/([a-zA-Z0-9_-]+)=([\-+]?[0-9]*\.?[0-9]+)(?=\s|>|\/|$)/g, '$1={$2}');
+    // 3. Wrap unquoted strings (anything else without quotes/braces) in ""
+    processed = processed.replace(/([a-zA-Z0-9_-]+)=([^"'{}\s/>][^\s/>]*)(?=\s|>|\/|$)/g, '$1="$2"');
+    // 4. Handle completely empty values e.g. w= followed by space or > (prevents 1:13 error)
+    processed = processed.replace(/([a-zA-Z0-9_-]+)=(?=\s|>|\/|$)(?!=")/g, '$1=""');
 
     // Wrap in expression for acorn
     let ast;
     try {
-        ast = JSXParser.parse(`(${jsxString})`, {
+        ast = JSXParser.parse(`(${processed})`, {
             ecmaVersion: 2020,
             sourceType: 'module',
         });
@@ -140,7 +150,7 @@ export function parseJSX(jsxString) {
     }
 
     const commands = [];
-    transformElement(expr, commands, null, errors, 0);
+    transformElement(expr, commands, undefined, errors, 0, idPrefix);
 
     return { commands, errors };
 }
@@ -148,7 +158,7 @@ export function parseJSX(jsxString) {
 /**
  * Recursively transform a JSX element into commands.
  */
-function transformElement(node, commands, parentIndex, errors, depth) {
+function transformElement(node, commands, parentId, errors, depth, idPrefix) {
     if (depth > 10) {
         errors.push('Max nesting depth (10) exceeded');
         return;
@@ -168,7 +178,54 @@ function transformElement(node, commands, parentIndex, errors, depth) {
 
     const type = figmaType || 'FRAME';
     const props = extractProps(node, errors);
+    const children = getElementChildren(node);
     const textContent = extractTextContent(node);
+
+    // --- SMART LAYOUT INFERENCE ENGINE (Web DOM Flow) ---
+    // If a structural frame has children, isn't explicitly absolute, and has no layout mode,
+    // we analyze its children to infer the correct web-like formatting context.
+    if (type === 'FRAME' && children.length > 0 && props.position !== 'absolute' && !props.layoutMode) {
+
+        const childTags = children.map(c => getTagName(c) || 'Frame');
+        const hasBlocks = childTags.some(t => ['Frame', 'AutoLayout', 'Group', 'Component'].includes(t));
+        const hasText = childTags.includes('Text');
+        const hasIcons = childTags.some(t => ['Ellipse', 'Line', 'Rectangle', 'Vector', 'Star', 'Polygon'].includes(t));
+
+        const isInteractive = ['Button', 'Input', 'Badge', 'Chip'].includes(tagName);
+
+        if (children.length === 1 && !hasBlocks) {
+            // Rule 1: Single Child Tight Wrapper
+            props.layoutMode = 'HORIZONTAL';
+            if (props.itemSpacing === undefined) props.itemSpacing = 0;
+            if (props.primaryAxisAlignItems === undefined) props.primaryAxisAlignItems = 'CENTER';
+            if (props.counterAxisAlignItems === undefined) props.counterAxisAlignItems = 'CENTER';
+
+        } else if (isInteractive) {
+            // Rule 2: Interactive Components
+            props.layoutMode = 'HORIZONTAL';
+            if (props.itemSpacing === undefined) props.itemSpacing = 8;
+            if (props.counterAxisAlignItems === undefined) props.counterAxisAlignItems = 'CENTER';
+
+        } else if (!hasBlocks && hasText && hasIcons) {
+            // Rule 3: Icon + Text Row
+            props.layoutMode = 'HORIZONTAL';
+            if (props.itemSpacing === undefined) props.itemSpacing = 8;
+            if (props.counterAxisAlignItems === undefined) props.counterAxisAlignItems = 'CENTER';
+
+        } else if (!hasBlocks && childTags.every(t => t === 'Text')) {
+            // Rule 4: Text Stack
+            props.layoutMode = 'VERTICAL';
+            if (props.itemSpacing === undefined) props.itemSpacing = 4;
+            if (props.width === undefined) props.width = 'fill';
+
+        } else {
+            // Rule 5: Structural Container
+            props.layoutMode = 'VERTICAL';
+            if (props.itemSpacing === undefined) props.itemSpacing = 16;
+            if (props.width === undefined && depth > 0) props.width = 'fill';
+        }
+    }
+    // ----------------------------------------------------
 
     // For Text nodes, set characters from children text
     if (type === 'TEXT' && textContent) {
@@ -180,25 +237,26 @@ function transformElement(node, commands, parentIndex, errors, depth) {
         props.layoutMode = 'VERTICAL';
     }
 
+    const id = `${idPrefix}node_${commands.length}`;
+
     // Build command
     const cmd = {
         command: 'node.create',
-        params: { type, props: { name: props.name || tagName, ...props } },
+        params: { id, type, props: { name: props.name || tagName, ...props } },
     };
 
     // If this is a child, reference parent
-    if (parentIndex !== null) {
-        cmd.params.parentIndex = parentIndex;
+    if (parentId) {
+        cmd.params.parentId = parentId;
     }
 
-    const myIndex = commands.length;
     commands.push(cmd);
 
     // Process children (skip text-only children for TEXT nodes)
     if (type !== 'TEXT') {
         const children = getElementChildren(node);
         for (const child of children) {
-            transformElement(child, commands, myIndex, errors, depth + 1);
+            transformElement(child, commands, id, errors, depth + 1, idPrefix);
         }
     }
 }
@@ -238,11 +296,20 @@ function extractProps(node, errors) {
             continue;
         }
 
+        // --- COLLISION PREVENTION ---
+        // If the mappedKey (e.g., 'width') is already set by a primary prop
+        // and we are currently processing a secondary shorthand (e.g., 'w'),
+        // we skip the secondary to avoid overwriting "fill" with something else.
+        if (props[mappedKey] !== undefined && rawKey !== mappedKey) {
+            continue;
+        }
+
         props[mappedKey] = transformPropValue(mappedKey, value);
     }
 
     return props;
 }
+
 
 function evaluateExpression(expr, errors) {
     if (expr.type === 'Literal') return expr.value;

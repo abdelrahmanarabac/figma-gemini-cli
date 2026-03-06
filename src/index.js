@@ -345,6 +345,17 @@ function showQuickStart() {
 // ============ WELCOME BANNER ============
 
 function showBanner() {
+  // Simple fallback for standard Windows cmd/powershell lacking UTF-8 support
+  const isBasicWindowsTerm = process.platform === 'win32' &&
+    !process.env.WT_SESSION &&
+    process.env.TERM_PROGRAM !== 'vscode';
+
+  if (isBasicWindowsTerm) {
+    console.log(chalk.cyan(`\n  === Figma Design System CLI ===`));
+    console.log(chalk.white(`  v${pkg.version}\n`));
+    return;
+  }
+
   console.log(chalk.cyan(`
   ███████╗██╗ ██████╗ ███╗   ███╗ █████╗       ██████╗ ███████╗       ██████╗██╗     ██╗
   ██╔════╝██║██╔════╝ ████╗ ████║██╔══██╗      ██╔══██╗██╔════╝      ██╔════╝██║     ██║

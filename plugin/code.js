@@ -49,13 +49,17 @@ const handlers = {
   },
 
   'selection.set': async (params) => {
-    const nodes = params.nodeIds.map(id => figma.getNodeById(id)).filter(Boolean);
+    const nodes = [];
+    for (const id of params.nodeIds) {
+      const node = await figma.getNodeByIdAsync(id);
+      if (node) nodes.push(node);
+    }
     figma.currentPage.selection = nodes;
     return { selected: nodes.length };
   },
 
   'node.read': async (params) => {
-    const node = figma.getNodeById(params.nodeId);
+    const node = await figma.getNodeByIdAsync(params.nodeId);
     if (!node) throw new Error(`Node ${params.nodeId} not found`);
     return serializeNode(node, params.depth || 2);
   },
@@ -79,11 +83,20 @@ const handlers = {
 
   'node.create': async (params) => {
     const node = await createNode(params.type, params.props || {}, params.parentId);
+    // Smart positioning: if root-level node (no parent), place after existing content
+    if (!params.parentId) {
+      const children = figma.currentPage.children;
+      let maxX = 0;
+      for (const c of children) {
+        if (c.id !== node.id) maxX = Math.max(maxX, c.x + c.width);
+      }
+      if (maxX > 0 && node.x === 0) node.x = maxX + 100;
+    }
     return { nodeId: node.id, name: node.name };
   },
 
   'node.update': async (params) => {
-    const node = figma.getNodeById(params.nodeId);
+    const node = await figma.getNodeByIdAsync(params.nodeId);
     if (!node) throw new Error(`Node ${params.nodeId} not found`);
     applyProps(node, params.props || {});
     return { nodeId: node.id, name: node.name };
@@ -93,7 +106,7 @@ const handlers = {
     const ids = params.nodeIds || [];
     let deleted = 0;
     for (const id of ids) {
-      const node = figma.getNodeById(id);
+      const node = await figma.getNodeByIdAsync(id);
       if (node) { node.remove(); deleted++; }
     }
     return { deleted };
@@ -102,7 +115,7 @@ const handlers = {
   'node.toComponent': async (params) => {
     const results = [];
     for (const id of (params.nodeIds || [])) {
-      const node = figma.getNodeById(id);
+      const node = await figma.getNodeByIdAsync(id);
       if (node && 'type' in node && node.type === 'FRAME') {
         const comp = figma.createComponentFromNode(node);
         results.push({ nodeId: comp.id, name: comp.name });
@@ -144,15 +157,32 @@ const handlers = {
 
   'batch': async (params) => {
     const results = [];
-    for (const cmd of (params.commands || [])) {
+    const registry = new Map();
+    for (let i = 0; i < (params.commands || []).length; i++) {
+      const cmd = params.commands[i];
       const handler = handlers[cmd.command];
       if (!handler) {
         results.push({ error: `Unknown command: ${cmd.command}` });
         continue;
       }
       try {
-        const result = await handler(cmd.params || {});
+        const cmdParams = Object.assign({}, cmd.params || {});
+        // Resolve parentId
+        if (cmdParams.parentId) {
+          if (registry.has(cmdParams.parentId)) {
+            cmdParams.parentId = registry.get(cmdParams.parentId);
+          } else {
+            throw new Error(`Virtual parent NOT RESOLVED in registry: ${cmdParams.parentId}`);
+          }
+        }
+
+        const result = await handler(cmdParams);
         results.push({ status: 'ok', data: result });
+
+        // Track generated ID
+        if (cmdParams.id && result && result.nodeId) {
+          registry.set(cmdParams.id, result.nodeId);
+        }
       } catch (err) {
         results.push({ status: 'error', error: err.message });
       }
@@ -201,11 +231,22 @@ const handlers = {
 
 async function createNode(type, props, parentId) {
   let node;
-  const parent = parentId ? figma.getNodeById(parentId) : figma.currentPage;
+  let parent = figma.currentPage;
+
+  if (parentId) {
+    parent = await figma.getNodeByIdAsync(parentId);
+    if (!parent) {
+      throw new Error(`Hierarchy Error: Cannot append child. Parent node resolving to "${parentId}" not found in Figma document.`);
+    }
+  }
 
   switch (type) {
     case 'FRAME':
       node = figma.createFrame();
+      node.fills = []; // Figma defaults to white; clear it so backgrounds are transparent unless defined
+      node.layoutMode = 'HORIZONTAL';
+      node.primaryAxisSizingMode = 'AUTO';
+      node.counterAxisSizingMode = 'AUTO';
       break;
     case 'RECTANGLE':
       node = figma.createRectangle();
@@ -215,7 +256,10 @@ async function createNode(type, props, parentId) {
       break;
     case 'TEXT':
       node = figma.createText();
-      await figma.loadFontAsync({ family: props.fontFamily || 'Inter', style: getFontStyle(props.fontWeight) });
+      const family = props.fontFamily || 'Inter';
+      const style = getFontStyle(props.fontWeight);
+      await figma.loadFontAsync({ family, style });
+      node.fontName = { family, style };
       break;
     case 'LINE':
       node = figma.createLine();
@@ -236,6 +280,9 @@ async function createNode(type, props, parentId) {
       node = figma.createFrame();
   }
 
+  // 🐛 THE FIX: We MUST append the node to the parent BEFORE applying properties.
+  // Figma ignores auto-layout sizing (like 'fill') if the node is floating unbound
+  // on the absolute canvas when the properties are applied.
   if (parent && 'appendChild' in parent && type !== 'GROUP') {
     parent.appendChild(node);
   }
@@ -267,37 +314,109 @@ function getFontStyle(weight) {
 }
 
 // ── Property Applicator ──────────────────────────────
+// ORDER MATTERS: layout mode must be set BEFORE resize,
+// otherwise Figma's AUTO sizing overrides explicit dimensions.
 
 function applyProps(node, props) {
-  // Name
+  // 1. Name
   if (props.name) node.name = props.name;
 
-  // Size
-  if (props.width !== undefined || props.height !== undefined) {
-    node.resize(
-      props.width || node.width || 100,
-      props.height || node.height || 100
-    );
+  // 2. Layout mode — MUST be set early so sizing logic knows the context
+  if (props.layoutMode && 'layoutMode' in node) {
+    node.layoutMode = props.layoutMode; // HORIZONTAL or VERTICAL
   }
 
-  // Fill color
-  if (props.fill) {
+  // 3. Prioritize Content (Characters & Fonts)
+  // This ensures Figma knows the intrinsic size of text before we apply constraints.
+  if (node.type === 'TEXT') {
+    if (props.fontSize !== undefined) node.fontSize = props.fontSize;
+    if (props.characters !== undefined) {
+      node.characters = props.characters;
+    }
+    if (props.color) {
+      const tColor = parseColor(props.color);
+      if (tColor) node.fills = [{ type: 'SOLID', color: tColor }];
+    }
+  }
+
+  // 4. Robust Sizing Logic
+  const hasLayout = node.parent && 'layoutMode' in node.parent && node.parent.layoutMode !== 'NONE';
+  const numW = (typeof props.width === 'number') ? props.width : undefined;
+  const numH = (typeof props.height === 'number') ? props.height : undefined;
+
+  // 4.1 Guard against 0-sized collapse
+  // If a node starts at 0x0, Figma's layout engine can sometimes lock it there.
+  if (node.width === 0 || node.height === 0) {
+    node.resize(Math.max(node.width, 100), Math.max(node.height, 100));
+  }
+
+  // 4.2 Horizontal Sizing
+  if ('layoutSizingHorizontal' in node) {
+    if (props.width === 'fill') {
+      // Logic for FILL
+      if (hasLayout && node.parent.layoutMode === 'HORIZONTAL' && node.parent.primaryAxisSizingMode === 'AUTO') {
+        node.layoutSizingHorizontal = 'HUG'; // Fallback to HUG if parent is HUG on same axis
+      } else {
+        node.layoutSizingHorizontal = 'FILL';
+        if ('layoutAlign' in node) node.layoutAlign = 'STRETCH'; // Force stretch for legacy stability
+      }
+    } else if (numW !== undefined) {
+      node.layoutSizingHorizontal = 'FIXED';
+      node.resize(numW, node.height);
+    } else {
+      node.layoutSizingHorizontal = 'HUG';
+    }
+  } else if (numW !== undefined) {
+    node.resize(numW, node.height);
+  }
+
+  // 4.3 Vertical Sizing
+  if ('layoutSizingVertical' in node) {
+    if (props.height === 'fill') {
+      if (hasLayout && node.parent.layoutMode === 'VERTICAL' && node.parent.primaryAxisSizingMode === 'AUTO') {
+        node.layoutSizingVertical = 'HUG';
+      } else {
+        node.layoutSizingVertical = 'FILL';
+      }
+    } else if (numH !== undefined) {
+      node.layoutSizingVertical = 'FIXED';
+      node.resize(node.width, numH);
+    } else {
+      node.layoutSizingVertical = 'HUG';
+    }
+  } else if (numH !== undefined) {
+    node.resize(node.width, numH);
+  }
+
+  // 4.4 Text Auto-Resize adjustments
+  if (node.type === 'TEXT') {
+    if (props.width === 'fill' || numW !== undefined) {
+      node.textAutoResize = 'HEIGHT'; // Fixed width / Fill width
+    } else if (numH !== undefined) {
+      node.textAutoResize = 'NONE';   // Fixed height
+    } else {
+      node.textAutoResize = 'WIDTH_AND_HEIGHT'; // Auto-size (HUG)
+    }
+  }
+
+  // 5. Fill color (Frames/Shapes)
+  if (node.type !== 'TEXT' && props.fill) {
     const color = parseColor(props.fill);
-    if (color) node.fills = [{ type: 'SOLID', color }];
+    if (color) node.fills = [{ type: 'SOLID', color: color }];
   }
 
-  // Stroke
+  // 6. Stroke
   if (props.stroke) {
-    const color = parseColor(props.stroke);
-    if (color) node.strokes = [{ type: 'SOLID', color }];
+    const sColor = parseColor(props.stroke);
+    if (sColor) node.strokes = [{ type: 'SOLID', color: sColor }];
   }
   if (props.strokeWidth !== undefined) node.strokeWeight = props.strokeWidth;
   if (props.strokeAlign) {
-    const map = { inside: 'INSIDE', outside: 'OUTSIDE', center: 'CENTER' };
-    node.strokeAlign = map[props.strokeAlign] || 'CENTER';
+    const saMap = { inside: 'INSIDE', outside: 'OUTSIDE', center: 'CENTER' };
+    node.strokeAlign = saMap[props.strokeAlign] || 'CENTER';
   }
 
-  // Corner radius
+  // 7. Corner radius
   if (props.cornerRadius !== undefined) node.cornerRadius = props.cornerRadius;
   if (props.topLeftRadius !== undefined) node.topLeftRadius = props.topLeftRadius;
   if (props.topRightRadius !== undefined) node.topRightRadius = props.topRightRadius;
@@ -305,21 +424,16 @@ function applyProps(node, props) {
   if (props.bottomRightRadius !== undefined) node.bottomRightRadius = props.bottomRightRadius;
   if (props.cornerSmoothing !== undefined) node.cornerSmoothing = props.cornerSmoothing;
 
-  // Opacity
+  // 8. Opacity
   if (props.opacity !== undefined) node.opacity = props.opacity;
 
-  // Layout
-  if (props.layoutMode && 'layoutMode' in node) {
-    node.layoutMode = props.layoutMode; // HORIZONTAL or VERTICAL
-    node.primaryAxisSizingMode = 'AUTO';
-    node.counterAxisSizingMode = 'AUTO';
-  }
+  // 9. Layout details (gap, wrap, grow)
   if (props.itemSpacing !== undefined && 'itemSpacing' in node) node.itemSpacing = props.itemSpacing;
   if (props.counterAxisSpacing !== undefined && 'counterAxisSpacing' in node) node.counterAxisSpacing = props.counterAxisSpacing;
   if (props.layoutWrap && 'layoutWrap' in node) node.layoutWrap = props.layoutWrap;
   if (props.layoutGrow !== undefined && 'layoutGrow' in node) node.layoutGrow = props.layoutGrow;
 
-  // Padding
+  // 10. Padding
   if (props.padding !== undefined) {
     node.paddingTop = node.paddingRight = node.paddingBottom = node.paddingLeft = props.padding;
   }
@@ -334,7 +448,7 @@ function applyProps(node, props) {
   if (props.paddingBottom !== undefined) node.paddingBottom = props.paddingBottom;
   if (props.paddingLeft !== undefined) node.paddingLeft = props.paddingLeft;
 
-  // Alignment
+  // 11. Alignment
   if (props.primaryAxisAlignItems && 'primaryAxisAlignItems' in node) {
     node.primaryAxisAlignItems = props.primaryAxisAlignItems;
   }
@@ -342,30 +456,59 @@ function applyProps(node, props) {
     node.counterAxisAlignItems = props.counterAxisAlignItems;
   }
 
-  // Sizing mode
+  // 12. Child sizing mode (legacy layoutAlign)
   if (props.layoutAlign && 'layoutAlign' in node) node.layoutAlign = props.layoutAlign;
 
-  // Clipping
+  // 13. Min/Max constraints
+  if (props.minWidth !== undefined) node.minWidth = props.minWidth;
+  if (props.maxWidth !== undefined) node.maxWidth = props.maxWidth;
+  if (props.minHeight !== undefined) node.minHeight = props.minHeight;
+  if (props.maxHeight !== undefined) node.maxHeight = props.maxHeight;
+
+  // 14. Clipping
   if (props.clipsContent !== undefined && 'clipsContent' in node) {
     node.clipsContent = props.clipsContent;
   }
 
-  // Text-specific
-  if ('characters' in node && props.characters) {
-    node.characters = props.characters;
-  }
-  if ('fontSize' in node && props.fontSize) node.fontSize = props.fontSize;
-  if ('fills' in node && props.color) {
-    const color = parseColor(props.color);
-    if (color) node.fills = [{ type: 'SOLID', color }];
+  // 15. Shadow
+  if (props.shadow && 'effects' in node) {
+    const parts = props.shadow.match(/(-?\d+)px\s+(-?\d+)px\s+(-?\d+)px\s+(rgba?\([^)]+\)|#\w+)/);
+    if (parts) {
+      const [_, ox, oy, sBlur, colorStr] = parts;
+      let shColor = { r: 0, g: 0, b: 0 };
+      let shOpacity = 0.25;
+      const rgbaMatch = colorStr.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([\d.]+))?\)/);
+      if (rgbaMatch) {
+        shColor = { r: +rgbaMatch[1] / 255, g: +rgbaMatch[2] / 255, b: +rgbaMatch[3] / 255 };
+        shOpacity = rgbaMatch[4] !== undefined ? +rgbaMatch[4] : 1;
+      } else {
+        shColor = parseColor(colorStr) || shColor;
+      }
+      const shadowColorObj = Object.assign({}, shColor, { a: shOpacity });
+      node.effects = (node.effects || []).concat([{
+        type: 'DROP_SHADOW', visible: true,
+        offset: { x: +ox, y: +oy }, radius: +sBlur, spread: 0,
+        color: shadowColorObj
+      }]);
+    }
   }
 
-  // Position
+  // 16. Blur
+  if (props.blur !== undefined && 'effects' in node) {
+    node.effects = (node.effects || []).concat([{
+      type: 'LAYER_BLUR', visible: true, radius: props.blur
+    }]);
+  }
+
+  // 17. Position
+  if (props.position === 'absolute' && 'layoutPositioning' in node) {
+    node.layoutPositioning = 'ABSOLUTE';
+  }
   if (props.x !== undefined) node.x = props.x;
   if (props.y !== undefined) node.y = props.y;
   if (props.rotation !== undefined) node.rotation = props.rotation;
 
-  // Blend mode
+  // 18. Blend mode
   if (props.blendMode && 'blendMode' in node) node.blendMode = props.blendMode.toUpperCase();
 }
 
@@ -417,7 +560,12 @@ function serializeNode(node, depth = 1) {
   if ('characters' in node) {
     data.characters = node.characters;
     data.fontSize = node.fontSize;
+    if ('textAutoResize' in node) data.textAutoResize = node.textAutoResize;
   }
+  if ('layoutSizingHorizontal' in node) data.layoutSizingHorizontal = node.layoutSizingHorizontal;
+  if ('layoutSizingVertical' in node) data.layoutSizingVertical = node.layoutSizingVertical;
+  if ('layoutAlign' in node) data.layoutAlign = node.layoutAlign;
+  if ('layoutGrow' in node) data.layoutGrow = node.layoutGrow;
 
   if (depth > 0 && 'children' in node) {
     data.children = node.children.map(c => serializeNode(c, depth - 1));
