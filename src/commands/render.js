@@ -1,18 +1,37 @@
 import { Command } from '../cli/command.js';
 import { parseJSX } from '../parser/jsx.js';
 import { sendBatch } from '../transport/bridge.js';
+import { readFileSync } from 'fs';
 
 class RenderCommand extends Command {
-  name = 'render <jsx>';
+  name = 'render [jsx]';
   description = 'Render JSX in Figma: figma-ds-cli render "<Frame ...>"';
 
+  constructor() {
+    super();
+    this.options = [
+      { flags: '-f, --file <path>', description: 'Read JSX from file' }
+    ];
+  }
+
   async execute(ctx, options, jsx) {
-    if (!jsx) {
-      ctx.logError('Usage: figma-ds-cli render "<Frame ...>"');
+    let inputJsx = jsx;
+
+    if (options.file) {
+      try {
+        inputJsx = readFileSync(options.file, 'utf8');
+      } catch (err) {
+        ctx.logError(`Failed to read file: ${err.message}`);
+        return;
+      }
+    }
+
+    if (!inputJsx) {
+      ctx.logError('Usage: figma-ds-cli render "<Frame ...>" or use -f <file>');
       return;
     }
 
-    const { commands, errors } = parseJSX(jsx);
+    const { commands, errors } = parseJSX(inputJsx);
 
     if (commands.length === 0) {
       ctx.logError('Invalid JSX');

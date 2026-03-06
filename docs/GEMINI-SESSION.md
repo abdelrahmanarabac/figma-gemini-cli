@@ -5,7 +5,7 @@
 `figma-ds-cli` is a CLI tool for managing Figma design systems. It connects to Figma Desktop via Chrome DevTools Protocol and executes JavaScript against the Figma Plugin API.
 
 **npm package:** `figma-ds-cli` (v1.1.0)
-**GitHub:** https://github.com/silships/figma-cli
+**GitHub:** https://github.com/abdelrahmanarabac/Figma-Gem-Cli
 
 ## Key Commands
 

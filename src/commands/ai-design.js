@@ -7,7 +7,7 @@ import { validateCommand } from '../protocol/commands.js';
 import chalk from 'chalk';
 
 class AiDesignCommand extends Command {
-  name = 'ai';
+  name = 'ai <prompt...>';
   description = 'AI-powered design generation: figma-ds-cli ai "prompt"';
   needsConnection = false;
   options = [
@@ -15,7 +15,9 @@ class AiDesignCommand extends Command {
     { flags: '--yolo', description: 'Skip confirmation, execute immediately' },
   ];
 
-  async execute(ctx, options, prompt) {
+  async execute(ctx, options, ...promptParts) {
+    const prompt = promptParts.join(' ');
+
     if (!prompt) {
       ctx.logError('Usage: figma-ds-cli ai "create a product card"');
       return;
@@ -28,7 +30,7 @@ class AiDesignCommand extends Command {
         ctx.logError('Daemon not running. Start with: figma-ds-cli connect');
         return;
       }
-      if (!health.plugin) {
+      if (!health.plugin && !health.cdp) {
         ctx.logError('Plugin not connected. Open FigCli plugin in Figma.');
         return;
       }

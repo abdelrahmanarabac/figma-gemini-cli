@@ -1,29 +1,26 @@
 {
-  "name": "figma-ds-cli",
-  "version": "1.1.1",
-  "description": "CLI for managing Figma design systems. Create variables, components, and more. No API key required.",
-  "author": "Sil Bormüller",
+  "name": "figma-gemini-cli",
+  "version": "1.0.0",
+  "description": "CLI for Gemini AI",
+  "author": "abdelrahmanarabac",
   "license": "MIT",
   "type": "module",
   "bin": {
-    "figma-ds-cli": "src/index.js"
+    "figma-gemini-cli": "src/index.js"
   },
   "files": [
     "src"
   ],
   "keywords": [
     "figma",
-    "design-system",
-    "design-tokens",
-    "cli",
-    "variables"
+    "gemini"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/silships/figma-cli.git"
+    "url": "git+https://github.com/abdelrahmanarabac/figma-gemini-cli.git"
   },
   "bugs": {
-    "url": "https://github.com/silships/figma-cli/issues"
+    "url": "https://github.com/abdelrahmanarabac/figma-gemini-cli/issues"
   },
   "engines": {
     "node": ">=18"
