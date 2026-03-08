@@ -75,6 +75,29 @@ export function startDaemon(force = false) {
   return true;
 }
 
+export function startFigma() {
+  if (IS_WINDOWS) {
+    const figmaPath = join(process.env.LOCALAPPDATA || '', 'Figma', 'Figma.exe');
+    if (existsSync(figmaPath)) {
+      spawn(figmaPath, ['--remote-debugging-port=9222'], { detached: true, stdio: 'ignore' }).unref();
+      return true;
+    }
+  } else if (IS_MAC) {
+    try {
+      spawn('open', ['-a', 'Figma', '--args', '--remote-debugging-port=9222'], { detached: true, stdio: 'ignore' }).unref();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
+export async function getFigmaClient() {
+  // Stub for now as CDP implementation (FigmaClient) is missing
+  return null;
+}
+
 export function hexToRgb(hex) {
   hex = hex.replace(/^#/, '');
   if (hex.length === 3) {

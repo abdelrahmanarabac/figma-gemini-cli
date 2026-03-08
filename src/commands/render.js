@@ -1,6 +1,5 @@
 import { Command } from '../cli/command.js';
 import { readFileSync } from 'fs';
-import { FigmaClient } from '../core/figma-client.js';
 
 async function readStdin() {
   if (process.stdin.isTTY) return null;
