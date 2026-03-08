@@ -53,7 +53,9 @@ const PROP_MAP = {
     x: 'x', y: 'y',
     rotate: 'rotation',
     shadow: 'shadow',
+    innerShadow: 'innerShadow',
     blur: 'blur',
+    backdropBlur: 'backdropBlur',
     overflow: 'clipsContent',
     align: 'textAlignHorizontal',
     alignV: 'textAlignVertical',
@@ -64,7 +66,8 @@ const NUMERIC_PROPS = new Set([
     'width', 'height', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight',
     'cornerRadius', 'itemSpacing', 'padding', 'paddingTop', 'paddingRight', 
     'paddingBottom', 'paddingLeft', 'paddingHorizontal', 'paddingVertical',
-    'fontSize', 'fontWeight', 'opacity', 'x', 'y', 'rotation', 'strokeWidth'
+    'fontSize', 'fontWeight', 'opacity', 'x', 'y', 'rotation', 'strokeWidth',
+    'blur', 'backdropBlur'
 ]);
 
 function transformPropValue(key, value, props) {

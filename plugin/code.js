@@ -326,9 +326,20 @@ async function createNodeTransaction(type, props, parentId) {
 
   // Appearance
   try {
+    const fills = [];
     if (props.fill) {
       const c = parseColor(props.fill);
-      if (c) node.fills = [{ type: 'SOLID', color: c }];
+      if (c) {
+        if ('a' in c) {
+          fills.push({ type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a });
+        } else {
+          fills.push({ type: 'SOLID', color: c });
+        }
+      }
+    }
+
+    if (fills.length > 0) {
+      node.fills = fills;
     } else if (node.type === 'FRAME') {
       node.fills = []; // Frames transparent by default
     }
@@ -340,12 +351,41 @@ async function createNodeTransaction(type, props, parentId) {
     if (props.stroke) {
       const c = parseColor(props.stroke);
       if (c) {
-        node.strokes = [{ type: 'SOLID', color: c }];
+        if ('a' in c) {
+          node.strokes = [{ type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a }];
+        } else {
+          node.strokes = [{ type: 'SOLID', color: c }];
+        }
         node.strokeWeight = props.strokeWidth || 1;
       }
     }
   } catch (e) {
     throw new Error(`Stroke setup failed: ${e.message}`);
+  }
+
+  // Effects (Shadows/Blurs)
+  try {
+    const effects = [];
+    if (props.shadow) {
+      const s = parseShadow(props.shadow);
+      if (s) effects.push(s);
+    }
+    if (props.innerShadow) {
+      const s = parseInnerShadow(props.innerShadow);
+      if (s) effects.push(s);
+    }
+    if (props.blur !== undefined) {
+      effects.push({ type: 'LAYER_BLUR', radius: props.blur, visible: true });
+    }
+    if (props.backdropBlur !== undefined) {
+      effects.push({ type: 'BACKGROUND_BLUR', radius: props.backdropBlur, visible: true });
+    }
+
+    if (effects.length > 0) {
+      node.effects = effects;
+    }
+  } catch (e) {
+    console.warn('Effects setup failed:', e.message);
   }
 
   try {
@@ -468,9 +508,21 @@ async function createNodeTransaction(type, props, parentId) {
 
 // ── Utils ────────────────────────────────────────────
 
-function parseColor(hex) {
-  if (!hex || typeof hex !== 'string') return null;
-  const clean = hex.replace('#', '');
+function parseColor(str) {
+  if (!str || typeof str !== 'string') return null;
+  
+  // Handle rgba(r, g, b, a)
+  const rgbaMatch = str.match(/rgba?\s*\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*(?:,\s*([\d.]+)\s*)?\)/i);
+  if (rgbaMatch) {
+    return {
+      r: parseInt(rgbaMatch[1]) / 255,
+      g: parseInt(rgbaMatch[2]) / 255,
+      b: parseInt(rgbaMatch[3]) / 255,
+      a: rgbaMatch[4] !== undefined ? parseFloat(rgbaMatch[4]) : 1
+    };
+  }
+
+  const clean = str.replace('#', '');
   let r, g, b;
   if (clean.length === 3) {
     r = parseInt(clean[0] + clean[0], 16) / 255;
@@ -482,6 +534,61 @@ function parseColor(hex) {
     b = parseInt(clean.slice(4, 6), 16) / 255;
   } else return null;
   return { r, g, b };
+}
+
+function parseShadow(str) {
+  if (!str || typeof str !== 'string') return null;
+  
+  // Extract color part (hex or rgba)
+  const colorMatch = str.match(/(?:#[a-fA-F0-9]{3,6}|rgba?\s*\([^)]+\))/);
+  const colorStr = colorMatch ? colorMatch[0] : '#000000';
+  const color = parseColor(colorStr);
+  
+  // Remove color from string to parse numbers
+  const numStr = str.replace(colorStr, '').trim();
+  const nums = numStr.split(/\s+/).map(n => parseFloat(n));
+  
+  // x y blur [spread]
+  const x = nums[0] || 0;
+  const y = nums[1] || 0;
+  const blur = nums[2] || 0;
+  const spread = nums[3] || 0;
+  
+  return {
+    type: 'DROP_SHADOW',
+    color: { r: color.r, g: color.g, b: color.b, a: (color.a !== undefined) ? color.a : 1 },
+    offset: { x, y },
+    radius: blur,
+    spread: spread,
+    visible: true,
+    blendMode: 'NORMAL'
+  };
+}
+
+function parseInnerShadow(str) {
+  if (!str || typeof str !== 'string') return null;
+  
+  const colorMatch = str.match(/(?:#[a-fA-F0-9]{3,6}|rgba?\s*\([^)]+\))/);
+  const colorStr = colorMatch ? colorMatch[0] : '#000000';
+  const color = parseColor(colorStr);
+  
+  const numStr = str.replace(colorStr, '').trim();
+  const nums = numStr.split(/\s+/).map(n => parseFloat(n));
+  
+  const x = nums[0] || 0;
+  const y = nums[1] || 0;
+  const blur = nums[2] || 0;
+  const spread = nums[3] || 0;
+  
+  return {
+    type: 'INNER_SHADOW',
+    color: { r: color.r, g: color.g, b: color.b, a: (color.a !== undefined) ? color.a : 1 },
+    offset: { x, y },
+    radius: blur,
+    spread: spread,
+    visible: true,
+    blendMode: 'NORMAL'
+  };
 }
 
 figma.ui.onmessage = async (msg) => {
