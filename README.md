@@ -8,113 +8,133 @@ A professional Node.js-based command-line interface that provides direct, progra
 
 ---
 
-## 🚀 Key Features
+## 🛠 Prerequisites
 
-*   **Secure Plugin Architecture**: Uses a local WebSocket bridge to communicate with a dedicated Figma plugin, ensuring no risk to the Figma binary.
-*   **AI Design Generation**: Leverage Google Gemini to transform natural language prompts into native Figma layouts and components.
-*   **High-Performance JSX Engine**: Render complex UI structures using a specialized JSX-to-Figma AST parser.
-*   **Advanced Token Management**: Instant injection of industry-standard palettes (Tailwind CSS, Radix UI, Shadcn/UI) and custom design tokens.
-*   **Architecture-First Design**: Decoupled transport layers and a command-based routing system for high maintainability.
+Before using this tool, ensure you have the following installed:
+
+### 1. Node.js
+Version **v18.0.0** or higher is required.
+
+### 2. Figma Desktop
+The CLI interacts directly with the local Figma Desktop application.
+
+### 3. Gemini CLI
+Install the official Gemini CLI globally to enable AI-powered design features:
+
+```bash
+npm install -g @google/gemini-cli
+```
+
+Then authenticate your account:
+
+```bash
+gemini auth login
+```
+
+Verify the installation:
+```bash
+gemini --version
+```
 
 ---
 
-## 📦 Installation
+## 📦 Full Setup
 
-### Requirements
-*   **Node.js**: v18.0.0 or higher.
-*   **Figma Desktop**: The CLI interacts with the local desktop application.
+Follow these steps to get the project running locally:
 
-### Setup
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/abdelrahmanarabac/figma-gemini-cli.git
-   cd figma-gemini-cli
-   ```
+```bash
+# 1. Clone the repository
+git clone https://github.com/abdelrahmanarabac/figma-gemini-cli.git
 
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
+# 2. Enter the project directory
+cd figma-gemini-cli
 
-3. **Install the Figma Plugin**:
-   *   Open Figma Desktop.
-   *   Go to **Plugins -> Development -> Import plugin from manifest...**.
-   *   Select the `plugin/manifest.json` file from this repository.
+# 3. Install project dependencies
+npm install
+
+# 4. Install the Figma Plugin
+# - Open Figma Desktop
+# - Go to Plugins -> Development -> Import plugin from manifest...
+# - Select 'plugin/manifest.json' from this folder
+```
 
 ---
 
 ## ⚡ Quick Start
 
-1. **Establish a connection**:
+1. **Start the connection**:
    ```bash
    node src/index.js connect
    ```
-   *Follow the instructions to open the FigCli plugin in Figma.*
+   *Note: Open the "FigCli" plugin in Figma after running this.*
 
-2. **Check your status**:
+2. **Verify connection**:
    ```bash
    node src/index.js status
    ```
 
-3. **Render your first UI element**:
+3. **Generate a design via AI**:
    ```bash
-   node src/index.js render '<Frame name="Hero" w={400} h={200} bg="#000" rounded={12} flex="col" items="center" justify="center"><Text color="#fff">Hello Figma!</Text></Frame>'
+   node src/index.js ai "Create a modern login screen for a SaaS app with dark mode"
    ```
 
 ---
 
-## 🛠 Core Commands
+## 📖 Command Reference
 
-### Connection & Maintenance
-| Command | Description |
-| :--- | :--- |
-| `connect` | Starts the daemon and initiates the Figma connection. |
-| `status` | Displays the health of the daemon and plugin connection. |
+### 🔌 Connection & Lifecycle
+Manage the bridge between your terminal and the Figma application.
 
-### Design & Rendering
-| Command | Description |
-| :--- | :--- |
-| `ai "prompt"` | Generates Figma layouts using Gemini AI. |
-| `render [jsx]` | Renders a JSX string or file into the current Figma page. |
-| `render-batch [json]` | Executes a sequence of rendering commands for complex scenes. |
+| Command | Description | Example |
+| :--- | :--- | :--- |
+| `connect` | Starts the daemon and initiates the plugin connection. | `node src/index.js connect` |
+| `status` | Checks if the daemon and plugin are correctly linked. | `node src/index.js status` |
 
-### Design Tokens
-| Command | Description |
-| :--- | :--- |
-| `tokens tailwind` | Injects the full Tailwind CSS color palette as Figma variables. |
-| `tokens clear` | Wipes all local variables and collections from the document. |
-| `tokens preset shadcn` | Creates primitive and semantic token sets for shadcn/ui. |
-| `tokens spacing` | Generates a 4px-base spacing scale. |
+### 🤖 Generative & Design
+High-level commands for creating and rendering UI elements.
+
+| Command | Description | Example |
+| :--- | :--- | :--- |
+| `ai <prompt>` | Generates Figma layouts using Gemini AI. | `node src/index.js ai "Create a pricing table"` |
+| `render <jsx>` | Renders a JSX string directly into Figma. | `node src/index.js render '<Frame bg="#f0f" w={100} h={100} />'` |
+| `render-batch` | Executes a sequence of rendering commands from a file. | `node src/index.js render-batch ./scene.json` |
+
+### 💎 Design Tokens
+Advanced management of Figma Variables and color palettes.
+
+| Command | Description | Example |
+| :--- | :--- | :--- |
+| `tokens tailwind` | Injects the full Tailwind CSS palette. | `node src/index.js tokens tailwind` |
+| `tokens preset` | Adds specific sets (e.g., `shadcn`, `radix`). | `node src/index.js tokens preset shadcn` |
+| `tokens spacing` | Creates a standardized 4px-base spacing scale. | `node src/index.js tokens spacing` |
+| `tokens clear` | **Destructive**: Wipes all local variables/collections. | `node src/index.js tokens clear` |
+| `tokens import` | Imports a JSON token file into a collection. | `node src/index.js tokens import ./my-tokens.json` |
+
+### 🛠 Utilities & FigJam
+Helper commands for documentation and collaboration.
+
+| Command | Description | Example |
+| :--- | :--- | :--- |
+| `export-zip` | Bundles tokens and themes into a portable ZIP. | `node src/index.js export-zip -o ./backup` |
+| `fj pages` | Lists all active FigJam pages. | `node src/index.js fj pages` |
+| `fj sticky` | Creates a sticky note in FigJam. | `node src/index.js fj sticky "Meeting notes"` |
 
 ---
 
 ## 🏗 Project Architecture
 
-The project is built on a modular architecture designed for performance and extensibility:
-
-*   **`src/cli/`**: The framework layer, handling command routing, dependency injection, and execution context.
-*   **`src/commands/`**: Pure command implementations. Each file represents a domain-specific capability.
-*   **`src/core/`**: The engine room. Contains the Gemini AI integration logic.
-*   **`src/transport/`**: Manages the communication lifecycle between the CLI and the Figma VM via a background daemon.
-*   **`src/parser/`**: A custom JSX parser that maps declarative attributes to native Figma API methods.
-*   **`plugin/`**: The bridge between the system and the Figma environment.
-
----
-
-## 🎨 Design Systems & Tokens
-
-The CLI is optimized for modern design system workflows. It treats **Figma Variables** as first-class citizens. Using the `tokens` command suite, you can programmatically define, update, and clear thousands of variables in milliseconds, bypassing the manual UI bottlenecks.
-
-Pre-bundled palettes include:
-*   **Tailwind CSS**: 240+ professional color primitives.
-*   **Radix UI**: 156 color steps across 13 families.
-*   **Shadcn/UI**: Ready-to-use semantic tokens for Light and Dark modes.
+*   **`src/cli/`**: The routing and execution engine.
+*   **`src/commands/`**: Modular command definitions.
+*   **`src/core/`**: Core logic for AI and Figma communication.
+*   **`src/transport/`**: Background daemon handling WebSocket traffic.
+*   **`src/parser/`**: JSX-to-Figma AST translation logic.
+*   **`plugin/`**: Native Figma environment bridge.
 
 ---
 
 ## 🤝 Contributing
 
-Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
+Contributions are welcome! Please feel free to submit a Pull Request.
 
 1. Fork the Project
 2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
