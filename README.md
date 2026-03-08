@@ -34,7 +34,7 @@ The CLI relies on a modern, Object-Oriented command router (`CliRouter`) with ro
 
 You can operate the CLI in two primary modes.
 
-### 1. Yolo Mode (Recommended)
+### 1. CDP Mode (Recommended)
 This mode automatically negotiates the patch process for the Figma Desktop app, providing an autonomous, stable CDP connection.
 ```powershell
 node src/index.js connect

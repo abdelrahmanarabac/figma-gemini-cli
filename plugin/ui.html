@@ -114,15 +114,8 @@
       const msg = event.data.pluginMessage;
       if (!msg) return;
 
-      if (msg.type === 'result') {
-        if (ws && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'result',
-            id: msg.id,
-            result: msg.result,
-            error: msg.error,
-          }));
-        }
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify(msg));
       }
     };
 

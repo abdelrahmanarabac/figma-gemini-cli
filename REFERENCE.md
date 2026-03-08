@@ -1,6 +1,6 @@
 # Command Reference
 
-The `figma-ds-cli` provides an extensive suite of commands manipulating the Figma workspace, design tokens, and FigJam boards.
+The `figma-gemini-cli` provides an extensive suite of commands manipulating the Figma workspace, design tokens, and FigJam boards.
 
 ---
 

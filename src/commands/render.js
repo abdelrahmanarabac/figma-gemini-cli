@@ -1,70 +1,77 @@
 import { Command } from '../cli/command.js';
-import { parseJSX } from '../parser/jsx.js';
-import { sendBatch } from '../transport/bridge.js';
 import { readFileSync } from 'fs';
+import { FigmaClient } from '../core/figma-client.js';
+
+async function readStdin() {
+  if (process.stdin.isTTY) return null;
+  let data = '';
+  for await (const chunk of process.stdin) {
+    data += chunk;
+  }
+  return data.trim();
+}
 
 class RenderCommand extends Command {
   name = 'render [jsx]';
-  description = 'Render JSX in Figma: figma-ds-cli render "<Frame ...>"';
+  description = 'Render JSX in Figma via file, string, or stdin';
 
   constructor() {
     super();
     this.options = [
-      { flags: '-f, --file <path>', description: 'Read JSX from file' }
+      { flags: '-f, --file <path>', description: 'Read JSX from file' },
+      { flags: '-c, --code <code>', description: 'Pass JSX as a raw string' },
+      { flags: '-v, --verbose', description: 'Show detailed logs' }
     ];
   }
 
   async execute(ctx, options, jsx) {
     let inputJsx = jsx;
 
-    if (options.file) {
+    if (options.code) {
+      inputJsx = options.code;
+    } else if (options.file) {
       try {
         inputJsx = readFileSync(options.file, 'utf8');
       } catch (err) {
         ctx.logError(`Failed to read file: ${err.message}`);
         return;
       }
+    } else if (!inputJsx) {
+      inputJsx = await readStdin();
     }
 
     if (!inputJsx) {
-      ctx.logError('Usage: figma-ds-cli render "<Frame ...>" or use -f <file>');
-      return;
-    }
-
-    const { commands, errors } = parseJSX(inputJsx);
-
-    if (commands.length === 0) {
-      ctx.logError('Invalid JSX');
-      if (errors.length > 0) {
-        console.log('Parse errors:', errors);
-      }
+      ctx.logError('No JSX provided. Use -f <file>, -c "<code>", or pipe into stdin.');
       return;
     }
 
     try {
-      const result = await sendBatch(commands);
-      if (result && Array.isArray(result.data)) {
-        const errors = result.data.filter(r => r.status === 'error');
-        if (errors.length > 0) {
-          ctx.logError(`Render partially failed with ${errors.length} error(s):`);
-          errors.forEach(e => console.error('  -', e.error));
-          return;
-        }
+      const result = await ctx.render(inputJsx);
+      if (result && result.error) {
+         ctx.logError(`Render failed: ${result.error}`);
+      } else {
+         ctx.logSuccess('Rendered successfully');
       }
-      ctx.logSuccess('Rendered successfully');
     } catch (err) {
-      ctx.logError(`Render failed: ${err.message}`);
+      ctx.logError(`Render error: ${err.message}`);
     }
   }
 }
 
 class RenderBatchCommand extends Command {
-  name = 'render batch <jsxArray>';
-  description = 'Render multiple JSX frames: render batch \'["<Frame ...>"]\'';
+  name = 'render-batch <jsxArray>';
+  description = 'Render multiple JSX frames sequentially';
+
+  constructor() {
+    super();
+    this.options = [
+      { flags: '-v, --verbose', description: 'Show detailed logs' }
+    ];
+  }
 
   async execute(ctx, options, jsxArray) {
     if (!jsxArray) {
-      ctx.logError('Usage: render batch \'["<Frame ...>", "<Frame ...>"]\'');
+      ctx.logError('Usage: render-batch \'["<Frame ...>", "<Frame ...>"]\'');
       return;
     }
 
@@ -81,31 +88,23 @@ class RenderBatchCommand extends Command {
       return;
     }
 
-    const allCommands = [];
-    let treeIndex = 0;
-    for (const jsx of items) {
-      const { commands, errors } = parseJSX(jsx, `tree_${treeIndex++}_`);
-      if (commands.length === 0) {
-        ctx.logError(`Invalid JSX: ${jsx.slice(0, 60)}...`);
-        if (errors.length > 0) console.log('Parse errors:', errors);
-        return;
-      }
-      allCommands.push(...commands);
-    }
-
     try {
-      const result = await sendBatch(allCommands);
-      if (result && Array.isArray(result.data)) {
-        const errors = result.data.filter(r => r.status === 'error');
-        if (errors.length > 0) {
-          ctx.logError(`Render batch partially failed with ${errors.length} error(s):`);
-          errors.forEach(e => console.error('  -', e.error));
-          return;
-        }
+      const { parseJSX } = await import('../parser/jsx.js');
+      const allCommands = [];
+      for (const jsx of items) {
+        const { commands } = parseJSX(jsx);
+        allCommands.push(...commands);
       }
+      
+      const { sendBatch } = await import('../transport/bridge.js');
+      const results = await sendBatch(allCommands);
+      
       ctx.logSuccess(`Rendered ${items.length} frames`);
+      if (options.verbose && results) {
+          console.log(results);
+      }
     } catch (err) {
-      ctx.logError(`Render failed: ${err.message}`);
+      ctx.logError(`Batch render error: ${err.message}`);
     }
   }
 }

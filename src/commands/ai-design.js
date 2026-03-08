@@ -8,18 +8,18 @@ import chalk from 'chalk';
 
 class AiDesignCommand extends Command {
   name = 'ai <prompt...>';
-  description = 'AI-powered design generation: figma-ds-cli ai "prompt"';
+  description = 'AI-powered design generation: figma-gemini-cli ai "prompt"';
   needsConnection = false;
   options = [
     { flags: '--plan', description: 'Preview JSX without executing' },
-    { flags: '--yolo', description: 'Skip confirmation, execute immediately' },
+    { flags: '--skip-confirm', description: 'Skip confirmation, execute immediately' },
   ];
 
   async execute(ctx, options, ...promptParts) {
     const prompt = promptParts.join(' ');
 
     if (!prompt) {
-      ctx.logError('Usage: figma-ds-cli ai "create a product card"');
+      ctx.logError('Usage: figma-gemini-cli ai "create a product card"');
       return;
     }
 
@@ -27,7 +27,7 @@ class AiDesignCommand extends Command {
     if (!options.plan) {
       const health = await checkHealth();
       if (health.status === 'unreachable') {
-        ctx.logError('Daemon not running. Start with: figma-ds-cli connect');
+        ctx.logError('Daemon not running. Start with: figma-gemini-cli connect');
         return;
       }
       if (!health.plugin && !health.cdp) {
@@ -37,7 +37,7 @@ class AiDesignCommand extends Command {
     }
 
     // Step 2: AI generates raw JSX
-    console.log(chalk.blue('  ⟳ Generating design...'));
+    console.log(chalk.blue('  [OK] Generating design...'));
     let rawOutput;
     try {
       rawOutput = await generateDesign(prompt);
@@ -64,7 +64,7 @@ class AiDesignCommand extends Command {
       ctx.logError('AI generated invalid JSX that could not be parsed.');
       if (errors.length > 0) {
         console.log(chalk.yellow('  Parse errors:'));
-        errors.forEach(e => console.log(chalk.gray(`    • ${e}`)));
+        errors.forEach(e => console.log(chalk.gray(`    - ${e}`)));
       }
       console.log(chalk.gray('\n  Sanitized JSX:'));
       console.log(chalk.gray('  ' + jsxCode.split('\n').slice(0, 10).join('\n  ')));
@@ -80,26 +80,26 @@ class AiDesignCommand extends Command {
 
     if (invalid.length > 0) {
       ctx.logError('Generated commands failed validation:');
-      invalid.forEach(e => console.log(chalk.yellow(`  • ${e}`)));
+      invalid.forEach(e => console.log(chalk.yellow(`  - ${e}`)));
       return;
     }
 
     // Warnings (non-fatal)
     if (errors.length > 0) {
-      errors.forEach(e => console.log(chalk.yellow(`  ⚠ ${e}`)));
+      errors.forEach(e => console.log(chalk.yellow(`  (!) ${e}`)));
     }
 
     // Step 6: Preview
-    console.log(chalk.green(`\n  ✓ Parsed ${commands.length} nodes from AI\n`));
+    console.log(chalk.green(`\n  [OK] Parsed ${commands.length} nodes from AI\n`));
 
-    console.log(chalk.gray('  ── JSX ──────────────────────────'));
+    console.log(chalk.gray('  -- JSX --------------------------'));
     jsxCode.split('\n').slice(0, 20).forEach(line => {
       console.log(chalk.cyan('  ' + line));
     });
     if (jsxCode.split('\n').length > 20) {
       console.log(chalk.gray(`  ... (${jsxCode.split('\n').length - 20} more lines)`));
     }
-    console.log(chalk.gray('  ─────────────────────────────────\n'));
+    console.log(chalk.gray('  ---------------------------------\n'));
 
     const typeCounts = {};
     for (const cmd of commands) {
@@ -120,8 +120,8 @@ class AiDesignCommand extends Command {
       return;
     }
 
-    // --yolo: skip confirmation
-    if (!options.yolo) {
+    // --skip-confirm: skip confirmation
+    if (!options.skipConfirm) {
       const readline = await import('readline');
       const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
       const answer = await new Promise(resolve => {
@@ -136,7 +136,7 @@ class AiDesignCommand extends Command {
     }
 
     // Step 7: Execute — send batch to daemon → plugin
-    console.log(chalk.blue('  ⟳ Sending to Figma...'));
+    console.log(chalk.blue('  [OK] Sending to Figma...'));
     try {
       const result = await sendBatch(commands);
       ctx.logSuccess(`Created ${commands.length} nodes in Figma`, result);

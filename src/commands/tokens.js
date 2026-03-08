@@ -13,38 +13,27 @@ function loadPalette(name) {
   return JSON.parse(readFileSync(join(palettesDir, name + '.json'), 'utf8'));
 }
 
-// Common Figma code for creating color variables from a palette object
-function createPaletteCode(colorsJson, collectionName) {
-  return `(async () => {
-const colors = ${colorsJson};
-function hexToRgb(hex) {
-  const r = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);
-  return r ? { r: parseInt(r[1], 16) / 255, g: parseInt(r[2], 16) / 255, b: parseInt(r[3], 16) / 255 } : null;
-}
-const cols = await figma.variables.getLocalVariableCollectionsAsync();
-let col = cols.find(c => c.name === '${collectionName}');
-if (!col) col = figma.variables.createVariableCollection('${collectionName}');
-const modeId = col.modes[0].modeId;
-const existingVars = await figma.variables.getLocalVariablesAsync();
-let count = 0;
-for (const [colorName, shades] of Object.entries(colors)) {
-  for (const [shade, hex] of Object.entries(shades)) {
-    const varName = shade === 'DEFAULT' ? colorName : colorName + '/' + shade;
-    const existing = existingVars.find(v => v.name === varName && v.variableCollectionId === col.id);
-    if (!existing) {
-      const v = figma.variables.createVariable(varName, col, 'COLOR');
-      const rgb = hexToRgb(hex);
-      if (rgb) { 
-        try { v.setValueForMode(modeId, rgb); count++; } catch(e) {}
+// ── Tokens Commands ─────────────────────────────────
+
+class TokensClearCommand extends Command {
+  name = 'tokens clear';
+  description = 'Delete all local variables and collections';
+
+  async execute(ctx) {
+    const spinner = ora('Clearing all tokens...').start();
+    try {
+      const { data } = await ctx.command('tokens.delete_all');
+      if (data) {
+        spinner.succeed(`Deleted ${data.deletedCollections || 0} collections and ${data.deletedVariables || 0} variables`);
+      } else {
+        spinner.succeed('Cleared all tokens');
       }
+    } catch (error) {
+      spinner.fail('Failed to clear tokens');
+      console.error(error.message);
     }
   }
 }
-return 'Created ' + count + ' color variables in ${collectionName}';
-})()`;
-}
-
-// ── Tokens Commands ─────────────────────────────────
 
 class TokensTailwindCommand extends Command {
   name = 'tokens tailwind';
@@ -56,10 +45,12 @@ class TokensTailwindCommand extends Command {
   async execute(ctx, opts) {
     const spinner = ora('Creating Tailwind color palette...').start();
     const colors = loadPalette('tailwind');
-    const code = createPaletteCode(JSON.stringify(colors), opts.collection);
     try {
-      const result = await ctx.eval(code);
-      spinner.succeed(result || 'Created Tailwind palette');
+      const { data } = await ctx.command('tokens.create_palette', {
+        colors,
+        collectionName: opts.collection
+      });
+      spinner.succeed(`Created ${data.created} color variables in ${data.collection}`);
     } catch (error) {
       spinner.fail('Failed to create palette');
       console.error(error.message);
@@ -76,11 +67,13 @@ class TokensShadcnCommand extends Command {
 
   async execute(ctx, opts) {
     const spinner = ora('Creating shadcn color primitives...').start();
-    const colors = loadPalette('tailwind'); // shadcn primitives = tailwind palette
-    const code = createPaletteCode(JSON.stringify(colors), opts.collection);
+    const colors = loadPalette('tailwind');
     try {
-      const result = await ctx.eval(code);
-      spinner.succeed(result || 'Created shadcn primitives');
+      const { data } = await ctx.command('tokens.create_palette', {
+        colors,
+        collectionName: opts.collection
+      });
+      spinner.succeed(`Created ${data.created} shadcn primitives`);
     } catch (error) {
       spinner.fail('Failed to create shadcn colors');
       console.error(error.message);
@@ -98,103 +91,31 @@ class TokensPresetCommand extends Command {
     if (presetLower === 'shadcn') {
       const spinner = ora('Adding shadcn colors...').start();
       const shadcnData = loadPalette('shadcn');
-      const primitives = shadcnData.primitives;
-      const semanticTokens = shadcnData.semantic;
-
-      const code = `(async () => {
-const primitives = ${JSON.stringify(primitives)};
-const semanticTokens = ${JSON.stringify(semanticTokens)};
-
-function hexToRgb(hex) {
-  const r = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);
-  return r ? { r: parseInt(r[1], 16) / 255, g: parseInt(r[2], 16) / 255, b: parseInt(r[3], 16) / 255 } : null;
-}
-
-const cols = await figma.variables.getLocalVariableCollectionsAsync();
-let primCol = cols.find(c => c.name === 'shadcn/primitives');
-if (!primCol) primCol = figma.variables.createVariableCollection('shadcn/primitives');
-const primModeId = primCol.modes[0].modeId;
-
-const existingVars = await figma.variables.getLocalVariablesAsync('COLOR');
-const primVarMap = {};
-let primCount = 0;
-
-for (const [colorName, shades] of Object.entries(primitives)) {
-  for (const [shade, hex] of Object.entries(shades)) {
-    const varName = shade === 'DEFAULT' ? colorName : colorName + '/' + shade;
-    let v = existingVars.find(ev => ev.name === varName && ev.variableCollectionId === primCol.id);
-    if (!v) {
-      v = figma.variables.createVariable(varName, primCol, 'COLOR');
-      const rgb = hexToRgb(hex);
-      if (rgb) { try { v.setValueForMode(primModeId, rgb); } catch(e) {} }
-      primCount++;
-    }
-    primVarMap[varName] = v;
-  }
-}
-
-let semCol = cols.find(c => c.name === 'shadcn/semantic');
-if (!semCol) semCol = figma.variables.createVariableCollection('shadcn/semantic');
-
-let lightModeId = semCol.modes.find(m => m.name === 'Light')?.modeId;
-let darkModeId = semCol.modes.find(m => m.name === 'Dark')?.modeId;
-
-if (!lightModeId) {
-  semCol.renameMode(semCol.modes[0].modeId, 'Light');
-  lightModeId = semCol.modes[0].modeId;
-}
-if (!darkModeId) {
-  darkModeId = semCol.addMode('Dark');
-}
-
-let semCount = 0;
-for (const [name, refs] of Object.entries(semanticTokens)) {
-  let v = existingVars.find(ev => ev.name === name && ev.variableCollectionId === semCol.id);
-  if (!v) {
-    v = figma.variables.createVariable(name, semCol, 'COLOR');
-    semCount++;
-  }
-  const lightPrim = primVarMap[refs.light];
-  if (lightPrim) { try { v.setValueForMode(lightModeId, { type: 'VARIABLE_ALIAS', id: lightPrim.id }); } catch(e) {} }
-  const darkPrim = primVarMap[refs.dark];
-  if (darkPrim) { try { v.setValueForMode(darkModeId, { type: 'VARIABLE_ALIAS', id: darkPrim.id }); } catch(e) {} }
-}
-
-return 'Created ' + primCount + ' primitives + ' + semCount + ' semantic tokens (Light/Dark)';
-})()`;
-
       try {
-        const result = await ctx.eval(code);
-        spinner.succeed(result || 'Added shadcn colors');
-        console.log(chalk.gray('\n  Collections created:'));
-        console.log(chalk.gray('    • shadcn/primitives - 244 color primitives'));
-        console.log(chalk.gray('    • shadcn/semantic   - 32 semantic tokens (Light/Dark mode)\n'));
+        const { data } = await ctx.command('tokens.create_shadcn', {
+          primitives: shadcnData.primitives,
+          semanticTokens: shadcnData.semantic
+        });
+        spinner.succeed(`Added shadcn colors: ${data.primCount} primitives + ${data.semCount} semantic tokens`);
       } catch (error) {
         spinner.fail('Failed to add shadcn');
         console.error(chalk.red(error.message));
       }
-
     } else if (presetLower === 'radix') {
       const spinner = ora('Adding Radix UI colors...').start();
       const radixColors = loadPalette('radix');
-      const code = createPaletteCode(JSON.stringify(radixColors), 'radix/colors');
-
       try {
-        const result = await ctx.eval(code);
-        spinner.succeed(result || 'Added Radix UI colors');
-        console.log(chalk.gray('\n  Collection created:'));
-        console.log(chalk.gray('    • radix/colors - 156 colors (13 families × 12 steps)\n'));
+        const { data } = await ctx.command('tokens.create_palette', {
+          colors: radixColors,
+          collectionName: 'radix/colors'
+        });
+        spinner.succeed(`Added Radix UI colors: ${data.created} colors`);
       } catch (error) {
         spinner.fail('Failed to add Radix colors');
         console.error(chalk.red(error.message));
       }
-
-    } else if (presetLower === 'material') {
-      console.log(chalk.yellow('Material Design preset coming soon!'));
-      console.log(chalk.gray('Available now: shadcn, radix'));
     } else {
       console.log(chalk.red(`Unknown preset: ${preset}`));
-      console.log(chalk.gray('Available presets: shadcn, radix, material (coming soon)'));
     }
   }
 }
@@ -216,28 +137,13 @@ class TokensSpacingCommand extends Command {
       '32': 128, '36': 144, '40': 160, '44': 176, '48': 192
     };
 
-    const code = `(async () => {
-const spacings = ${JSON.stringify(spacings)};
-const cols = await figma.variables.getLocalVariableCollectionsAsync();
-let col = cols.find(c => c.name === '${opts.collection}');
-if (!col) col = figma.variables.createVariableCollection('${opts.collection}');
-const modeId = col.modes[0].modeId;
-const existingVars = await figma.variables.getLocalVariablesAsync();
-let count = 0;
-for (const [name, value] of Object.entries(spacings)) {
-  const existing = existingVars.find(v => v.name === 'spacing/' + name);
-  if (!existing) {
-    const v = figma.variables.createVariable('spacing/' + name, col, 'FLOAT');
-    try { v.setValueForMode(modeId, value); } catch(e) {}
-    count++;
-  }
-}
-return 'Created ' + count + ' spacing variables';
-})()`;
-
     try {
-      const result = await ctx.eval(code);
-      spinner.succeed(result || 'Created spacing scale');
+      const { data } = await ctx.command('tokens.create_scale', {
+        values: spacings,
+        collectionName: opts.collection,
+        prefix: 'spacing'
+      });
+      spinner.succeed(`Created ${data.created} spacing variables`);
     } catch (error) {
       spinner.fail('Failed to create spacing scale');
     }
@@ -258,28 +164,13 @@ class TokensRadiiCommand extends Command {
       'xl': 12, '2xl': 16, '3xl': 24, 'full': 9999
     };
 
-    const code = `(async () => {
-const radii = ${JSON.stringify(radii)};
-const cols = await figma.variables.getLocalVariableCollectionsAsync();
-let col = cols.find(c => c.name === '${opts.collection}');
-if (!col) col = figma.variables.createVariableCollection('${opts.collection}');
-const modeId = col.modes[0].modeId;
-const existingVars = await figma.variables.getLocalVariablesAsync();
-let count = 0;
-for (const [name, value] of Object.entries(radii)) {
-  const existing = existingVars.find(v => v.name === 'radius/' + name);
-  if (!existing) {
-    const v = figma.variables.createVariable('radius/' + name, col, 'FLOAT');
-    try { v.setValueForMode(modeId, value); } catch(e) {}
-    count++;
-  }
-}
-return 'Created ' + count + ' radius variables';
-})()`;
-
     try {
-      const result = await ctx.eval(code);
-      spinner.succeed(result || 'Created border radii');
+      const { data } = await ctx.command('tokens.create_scale', {
+        values: radii,
+        collectionName: opts.collection,
+        prefix: 'radius'
+      });
+      spinner.succeed(`Created ${data.created} radius variables`);
     } catch (error) {
       spinner.fail('Failed to create radii');
     }
@@ -299,72 +190,18 @@ class TokensImportCommand extends Command {
       tokensData = JSON.parse(readFileSync(file, 'utf8'));
     } catch (error) {
       ctx.logError(`Could not read file: ${file}`);
-      process.exit(1);
+      return;
     }
 
     const spinner = ora('Importing tokens...').start();
     const collectionName = opts.collection || 'Imported Tokens';
 
-    const code = `(async () => {
-const data = ${JSON.stringify(tokensData)};
-const collectionName = '${collectionName}';
-
-function hexToRgb(hex) {
-  const r = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);
-  if (!r) return null;
-  return { r: parseInt(r[1], 16) / 255, g: parseInt(r[2], 16) / 255, b: parseInt(r[3], 16) / 255 };
-}
-
-function detectType(value) {
-  if (typeof value === 'string' && value.startsWith('#')) return 'COLOR';
-  if (typeof value === 'number') return 'FLOAT';
-  if (typeof value === 'boolean') return 'BOOLEAN';
-  return 'STRING';
-}
-
-function flattenTokens(obj, prefix = '') {
-  const result = [];
-  for (const [key, val] of Object.entries(obj)) {
-    const name = prefix ? prefix + '/' + key : key;
-    if (val && typeof val === 'object' && !val.value && !val.type) {
-      result.push(...flattenTokens(val, name));
-    } else {
-      const value = val?.value ?? val;
-      const type = val?.type?.toUpperCase() || detectType(value);
-      result.push({ name, value, type });
-    }
-  }
-  return result;
-}
-
-const cols = await figma.variables.getLocalVariableCollectionsAsync();
-let col = cols.find(c => c.name === collectionName);
-if (!col) col = figma.variables.createVariableCollection(collectionName);
-const modeId = col.modes[0].modeId;
-
-const existingVars = await figma.variables.getLocalVariablesAsync();
-const tokens = flattenTokens(data);
-let count = 0;
-
-for (const { name, value, type } of tokens) {
-  const existing = existingVars.find(v => v.name === name);
-  if (!existing) {
     try {
-      const figmaType = type === 'COLOR' ? 'COLOR' : type === 'FLOAT' || type === 'NUMBER' ? 'FLOAT' : type === 'BOOLEAN' ? 'BOOLEAN' : 'STRING';
-      const v = figma.variables.createVariable(name, col, figmaType);
-      let figmaValue = value;
-      if (figmaType === 'COLOR') figmaValue = hexToRgb(value);
-      if (figmaValue !== null) { try { v.setValueForMode(modeId, figmaValue); } catch(e) {} count++; }
-    } catch (e) {}
-  }
-}
-
-return 'Imported ' + count + ' tokens into ' + collectionName;
-})()`;
-
-    try {
-      const result = await ctx.eval(code);
-      spinner.succeed(result || 'Tokens imported');
+      const { data } = await ctx.command('tokens.create_palette', {
+        colors: tokensData,
+        collectionName
+      });
+      spinner.succeed(`Imported ${data.created} tokens into ${data.collection}`);
     } catch (error) {
       spinner.fail('Failed to import tokens');
       console.error(error.message);
@@ -373,6 +210,7 @@ return 'Imported ' + count + ' tokens into ' + collectionName;
 }
 
 export default [
+  new TokensClearCommand(),
   new TokensTailwindCommand(),
   new TokensShadcnCommand(),
   new TokensPresetCommand(),

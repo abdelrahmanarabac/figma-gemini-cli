@@ -17,11 +17,16 @@ export class Command {
    * The description shown in the CLI help menu.
    * @type {string}
    */
-  description = '';
+   description = '';
 
-  /**
-   * List of arguments and flags this command accepts.
-   * @type {CommandOption[]}
+   /**
+   * Optional alias for the command.
+   * @type {string|undefined}
+   */
+   alias = undefined;
+
+   /**
+   * List of arguments and flags this command accepts.   * @type {CommandOption[]}
    */
   options = [];
 

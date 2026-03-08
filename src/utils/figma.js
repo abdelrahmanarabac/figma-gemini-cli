@@ -83,18 +83,15 @@ export async function fastEval(code) {
 }
 
 export async function fastRender(jsx) {
-  // Try daemon first
-  if (await isDaemonRunning()) {
-    try {
-      return await daemonExec('render', { jsx });
-    } catch (e) {
-      // Continue to fallbacks
-    }
+  const { parseJSX } = await import('../parser/jsx.js');
+  const { sendBatch } = await import('../transport/bridge.js');
+  
+  const { commands, errors } = parseJSX(jsx);
+  if (commands.length === 0) {
+    throw new Error('Failed to parse JSX: ' + (errors[0] || 'Unknown error'));
   }
-
-  // Fallback: direct connection
-  const client = await getFigmaClient();
-  return await client.render(jsx);
+  
+  return await sendBatch(commands);
 }
 
 export function getFigmaPath() {
@@ -123,11 +120,11 @@ export function startFigma() {
 export function killFigma() {
   try {
     if (IS_MAC) {
-      execSync('pkill -x Figma 2>/dev/null || true', { stdio: 'pipe' });
+      try { execSync('pkill -x Figma', { stdio: 'ignore' }); } catch (e) { }
     } else if (IS_WINDOWS) {
-      execSync('taskkill /IM Figma.exe /F 2>nul', { stdio: 'pipe' });
+      try { execSync('taskkill /IM Figma.exe /F', { stdio: 'ignore' }); } catch (e) { }
     } else {
-      execSync('pkill -x figma 2>/dev/null || true', { stdio: 'pipe' });
+      try { execSync('pkill -x figma', { stdio: 'ignore' }); } catch (e) { }
     }
   } catch (e) { }
 }
@@ -148,13 +145,35 @@ export function stopDaemon() {
   cleanStaleDaemon();
   try {
     if (IS_MAC || IS_LINUX) {
-      execSync(`lsof -ti:${DAEMON_PORT} | xargs kill -9 2>/dev/null || true`, { stdio: 'pipe' });
+      try { execSync(`lsof -ti:${DAEMON_PORT} | xargs kill -9`, { stdio: 'ignore' }); } catch (e) { }
+    } else if (IS_WINDOWS) {
+      try {
+        const pids = execSync(`netstat -ano | findstr :${DAEMON_PORT}`, { encoding: 'utf8' });
+        const lines = pids.trim().split('\\n');
+        for (const line of lines) {
+          const parts = line.trim().split(/\\s+/);
+          const pid = parts[parts.length - 1];
+          if (pid && pid !== '0') {
+            execSync(`taskkill /PID ${pid} /F`, { stdio: 'ignore' });
+          }
+        }
+      } catch (e) { }
     }
   } catch { }
 }
 
 export async function startDaemon(force = false, mode = 'auto') {
   if (await isDaemonRunning() && !force) return;
+
+  // 1. Check for port conflicts
+  try {
+    const testRes = await fetch(`http://127.0.0.1:${DAEMON_PORT}/health`, { signal: AbortSignal.timeout(500) });
+    if (testRes.status === 200 && !force) {
+      return; // Already running
+    }
+  } catch (e) {
+    // Port might be in use by another app or just not responding correctly
+  }
 
   // 1. Clean up any corrupted state before starting
   cleanStaleDaemon();
@@ -187,7 +206,8 @@ export async function startDaemon(force = false, mode = 'auto') {
     await new Promise(r => setTimeout(r, 250));
   }
 
-  throw new Error(`Daemon failed to start. Check logs at: ${DAEMON_LOG_FILE}`);
+  // Check if port is in use but not by us
+  throw new Error(`Daemon failed to start on port ${DAEMON_PORT}. Ensure the port is not in use by another application. Check logs at: ${DAEMON_LOG_FILE}`);
 }
 
 export function hexToRgb(hex) {

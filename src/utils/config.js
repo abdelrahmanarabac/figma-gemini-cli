@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
-const CONFIG_DIR = join(homedir(), '.figma-ds-cli');
+const CONFIG_DIR = join(homedir(), '.figma-gemini-cli');
 const CONFIG_FILE = join(CONFIG_DIR, 'config.json');
 
 export function loadConfig() {

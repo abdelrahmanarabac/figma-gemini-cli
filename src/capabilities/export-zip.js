@@ -71,7 +71,7 @@ class ExportZipCommand extends Command {
         // Step 2: Build JSON files in memory
         const metadata = {
             exportedAt: new Date().toISOString(),
-            source: 'figma-ds-cli',
+            source: 'figma-gemini-cli',
             collections: data.collections.length,
             variables: data.variables.length,
         };

@@ -4,11 +4,6 @@ export class CommandContext {
   /**
    * @param {Object} options - Global CLI options (e.g. { json: true })
    * @param {Object} deps - Injected dependencies
-   * @param {{ load: Function, save: Function }} deps.config - Config handlers
-   * @param {() => Promise<any>} deps.getFigmaClient - Factory to get a connected Figma CDP client
-   * @param {() => number} deps.getCdpPort - Gets the active port
-   * @param {(code: string) => Promise<any>} deps.fastEval - Execute code in Figma (daemon + fallback)
-   * @param {(jsx: string) => Promise<any>} deps.fastRender - Render JSX in Figma (daemon + fallback)
    */
   constructor(options = {}, deps = {}) {
     // If output is piped or explicitly requests JSON, use strict JSON output.
@@ -20,6 +15,15 @@ export class CommandContext {
   }
 
   // ── Output ───────────────────────────────────────────
+
+  _getSymbol(type) {
+    const symbols = {
+      success: '[OK]',
+      warning: '[!]',
+      error: '[X]'
+    };
+    return symbols[type] || '';
+  }
 
   log(message, jsonPayload = null) {
     if (this.isJson) {
@@ -38,12 +42,12 @@ export class CommandContext {
       }
       return;
     }
-    console.log(chalk.green(`✓ ${message}`));
+    console.log(chalk.green(`${this._getSymbol('success')} ${message}`));
   }
 
   logWarning(message) {
     if (this.isJson) return;
-    console.log(chalk.yellow(`⚠ ${message}`));
+    console.log(chalk.yellow(`${this._getSymbol('warning')} ${message}`));
   }
 
   logError(message, jsonPayload = null) {
@@ -51,15 +55,13 @@ export class CommandContext {
       console.log(JSON.stringify(jsonPayload || { error: message }, null, 2));
       return;
     }
-    console.log(chalk.red(`✗ ${message}`));
+    console.log(chalk.red(`${this._getSymbol('error')} ${message}`));
   }
 
   // ── Figma Execution ──────────────────────────────────
 
   /**
    * Execute Figma Plugin API code via structured command protocol.
-   * Routes through daemon → plugin 'eval' handler.
-   * Falls back to direct fastEval if daemon is unavailable.
    * @param {string} code - JavaScript code to evaluate in Figma
    * @returns {Promise<any>}
    */
@@ -68,7 +70,6 @@ export class CommandContext {
       const result = await this.command('eval', { code });
       return result?.data;
     } catch (e) {
-      // Fallback to legacy direct eval if daemon is down
       if (this._deps.fastEval) {
         return await this._deps.fastEval(code);
       }
@@ -87,7 +88,7 @@ export class CommandContext {
     const { commands, errors } = parseJSX(jsx);
 
     if (commands.length === 0) {
-      throw new Error('Failed to parse JSX:\\n' + errors.join('\\n'));
+      throw new Error('Failed to parse JSX:\n' + errors.join('\n'));
     }
 
     return await sendBatch(commands);
@@ -95,7 +96,6 @@ export class CommandContext {
 
   /**
    * Send a structured command to the Figma plugin.
-   * Safe, deterministic, batchable alternative to eval.
    * @param {string} name - Command name
    * @param {Object} params - Command parameters
    * @returns {Promise<any>}
@@ -110,25 +110,6 @@ export class CommandContext {
   get config() {
     if (!this._deps.config) throw new Error('Config dependency not injected');
     return this._deps.config;
-  }
-
-  get cdpPort() {
-    if (!this._deps.getCdpPort) throw new Error('getCdpPort dependency not injected');
-    return this._deps.getCdpPort();
-  }
-
-  async getActivePage() {
-    if (!this._deps.getActivePage) throw new Error('getActivePage dependency not injected');
-    return await this._deps.getActivePage(this.cdpPort);
-  }
-
-  async getFigmaClient() {
-    if (!this._deps.getFigmaClient) throw new Error('FigmaClient dependency not injected');
-
-    if (!this._figmaClient) {
-      this._figmaClient = await this._deps.getFigmaClient();
-    }
-    return this._figmaClient;
   }
 
   async close() {

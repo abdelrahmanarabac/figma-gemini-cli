@@ -93,6 +93,10 @@ export class CliRouter {
       cmd.description(commandInstance.description);
     }
 
+    if (commandInstance.alias) {
+      cmd.alias(commandInstance.alias);
+    }
+
     if (commandInstance.options) {
       commandInstance.options.forEach(opt => {
         if (opt.required) {
@@ -134,27 +138,18 @@ export class CliRouter {
    * @param {CommandContext} ctx
    */
   async _ensureConnection(ctx) {
-    // Try daemon health check first (works for both CDP and Plugin modes)
     try {
-      const { execSync } = await import('child_process');
-      const health = execSync(`curl -s http://127.0.0.1:3456/health`, { encoding: 'utf8', timeout: 2000 });
-      const data = JSON.parse(health);
-      if (data.status === 'ok' && (data.plugin || data.cdp)) {
+      const res = await fetch(`http://127.0.0.1:3456/health`, { signal: AbortSignal.timeout(2000) });
+      const data = await res.json();
+      if (data.status === 'ok' && data.plugin) {
         return;
       }
     } catch { }
 
-    // Fallback: check CDP directly via getActivePage
-    try {
-      const page = await ctx.getActivePage();
-      if (page) return;
-    } catch { }
-
     // Not connected — show helpful message and exit
     console.log(chalk.red('\n✗ Not connected to Figma\n'));
-    console.log(chalk.white('  Make sure Figma is running:'));
-    console.log(chalk.cyan('  figma-ds-cli connect') + chalk.gray(' (Yolo Mode)'));
-    console.log(chalk.cyan('  figma-ds-cli connect --safe') + chalk.gray(' (Safe Mode)\n'));
+    console.log(chalk.white('  Ensure the FigCli plugin is open in Figma and run:'));
+    console.log(chalk.cyan('  figma-gemini-cli connect\n'));
     process.exit(1);
   }
 

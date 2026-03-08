@@ -1,16 +1,9 @@
 /**
- * JSX Parser + AST Transformer
- *
- * Parses JSX design DSL into structured commands.
- * Uses acorn + acorn-jsx for real AST parsing (no regex).
- *
- * Pipeline: JSX string → acorn AST → command list
+ * Simple Regex-based JSX Parser
+ * 
+ * Restored to a predictable, deterministic pipeline.
+ * Replaces complex AST parsing with stable regex-based extraction.
  */
-
-import * as acorn from 'acorn';
-import jsx from 'acorn-jsx';
-
-const JSXParser = acorn.Parser.extend(jsx());
 
 // Map JSX component names → Figma node types
 const COMPONENT_MAP = {
@@ -23,77 +16,52 @@ const COMPONENT_MAP = {
     'Line': 'LINE',
     'Component': 'COMPONENT',
     'Instance': 'INSTANCE',
+    'Image': 'RECTANGLE',    // Image is a rectangle with image fill
+    'Icon': 'FRAME',         // Icon is usually a frame or svg
+    'SVG': 'FRAME',
 };
 
 // Map JSX prop names → Figma API property names
 const PROP_MAP = {
-    // Size
     width: 'width', w: 'width',
     height: 'height', h: 'height',
     minWidth: 'minWidth', minW: 'minWidth',
     maxWidth: 'maxWidth', maxW: 'maxWidth',
     minHeight: 'minHeight', minH: 'minHeight',
     maxHeight: 'maxHeight', maxH: 'maxHeight',
-
-    // Name
     name: 'name',
-
-    // Fill / Stroke
     fill: 'fill', bg: 'fill',
     stroke: 'stroke',
     strokeWidth: 'strokeWidth',
-    strokeAlign: 'strokeAlign',
     opacity: 'opacity',
-
-    // Corner radius
     cornerRadius: 'cornerRadius', rounded: 'cornerRadius',
-    cornerSmoothing: 'cornerSmoothing',
-    roundedTL: 'topLeftRadius', roundedTR: 'topRightRadius',
-    roundedBL: 'bottomLeftRadius', roundedBR: 'bottomRightRadius',
-
-    // Layout
-    flex: 'layoutMode',          // "row" → HORIZONTAL, "col" → VERTICAL
+    flex: 'layoutMode',
     gap: 'itemSpacing',
     wrap: 'layoutWrap',
-    rowGap: 'counterAxisSpacing',
-    grow: 'layoutGrow',
-    stretch: 'layoutAlign',
-
-    // Padding
     p: 'padding',
     px: 'paddingHorizontal',
     py: 'paddingVertical',
     pt: 'paddingTop', pr: 'paddingRight',
     pb: 'paddingBottom', pl: 'paddingLeft',
-
-    // Alignment
     justify: 'primaryAxisAlignItems',
     items: 'counterAxisAlignItems',
-
-    // Text props
     fontSize: 'fontSize', size: 'fontSize',
     fontWeight: 'fontWeight', weight: 'fontWeight',
-    color: 'color',
-    font: 'fontFamily',
-
-    // Position
-    position: 'position',
+    color: 'fill',
     x: 'x', y: 'y',
     rotate: 'rotation',
-
-    // Effects
     shadow: 'shadow',
     blur: 'blur',
     overflow: 'clipsContent',
-
-    // Blend
-    blendMode: 'blendMode',
-
-    // Variant (for custom components like Button)
-    variant: 'variant',
 };
 
-// Layout value transforms
+const NUMERIC_PROPS = new Set([
+    'width', 'height', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight',
+    'cornerRadius', 'itemSpacing', 'padding', 'paddingTop', 'paddingRight', 
+    'paddingBottom', 'paddingLeft', 'paddingHorizontal', 'paddingVertical',
+    'fontSize', 'fontWeight', 'opacity', 'x', 'y', 'rotation', 'strokeWidth'
+]);
+
 function transformPropValue(key, value) {
     if (key === 'layoutMode') {
         if (value === 'row') return 'HORIZONTAL';
@@ -101,8 +69,6 @@ function transformPropValue(key, value) {
         return value;
     }
     if (key === 'layoutWrap' && value === true) return 'WRAP';
-    if (key === 'layoutAlign' && value === true) return 'STRETCH';
-    if (key === 'clipsContent') return value === 'hidden' ? true : value;
     if (key === 'primaryAxisAlignItems' || key === 'counterAxisAlignItems') {
         const map = { start: 'MIN', center: 'CENTER', end: 'MAX', between: 'SPACE_BETWEEN' };
         return map[value] || value;
@@ -111,253 +77,208 @@ function transformPropValue(key, value) {
         const map = { thin: 100, light: 300, regular: 400, normal: 400, medium: 500, semibold: 600, bold: 700, extrabold: 800, black: 900 };
         return map[value] || value;
     }
+    if (NUMERIC_PROPS.has(key) && typeof value === 'string') {
+        const num = Number(value);
+        return isNaN(num) ? value : num;
+    }
     return value;
 }
 
 /**
- * Parse JSX string into structured commands.
- * @param {string} jsxString - JSX design DSL
- * @returns {{ commands: object[], errors: string[] }}
+ * Enhanced Prop Parser
+ * Handles: multiline, quotes, and nested braces (up to 1 level for common usage).
  */
-export function parseJSX(jsxString, idPrefix = "") {
-    const errors = [];
-
-    // Pre-process JSX to handle unquoted attributes (common when CLI args strip quotes)
-    // 1. Wrap unquoted booleans in {}
-    let processed = jsxString.replace(/([a-zA-Z0-9_-]+)=(true|false)(?=\s|>|\/|$)/g, '$1={$2}');
-    // 2. Wrap unquoted numbers in {}
-    processed = processed.replace(/([a-zA-Z0-9_-]+)=([\-+]?[0-9]*\.?[0-9]+)(?=\s|>|\/|$)/g, '$1={$2}');
-    // 3. Wrap unquoted strings (anything else without quotes/braces) in ""
-    processed = processed.replace(/([a-zA-Z0-9_-]+)=([^"'{}\s/>][^\s/>]*)(?=\s|>|\/|$)/g, '$1="$2"');
-    // 4. Handle completely empty values e.g. w= followed by space or > (prevents 1:13 error)
-    processed = processed.replace(/([a-zA-Z0-9_-]+)=(?=\s|>|\/|$)(?!=")/g, '$1=""');
-
-    // Wrap in expression for acorn
-    let ast;
-    try {
-        ast = JSXParser.parse(`(${processed})`, {
-            ecmaVersion: 2020,
-            sourceType: 'module',
-        });
-    } catch (err) {
-        return { commands: [], errors: [`JSX parse error: ${err.message}`] };
-    }
-
-    // Find the JSX expression
-    const expr = ast.body[0]?.expression;
-    if (!expr || expr.type !== 'JSXElement') {
-        return { commands: [], errors: ['No JSX element found'] };
-    }
-
-    const commands = [];
-    transformElement(expr, commands, undefined, errors, 0, idPrefix);
-
-    return { commands, errors };
-}
-
-/**
- * Recursively transform a JSX element into commands.
- */
-function transformElement(node, commands, parentId, errors, depth, idPrefix) {
-    if (depth > 10) {
-        errors.push('Max nesting depth (10) exceeded');
-        return;
-    }
-
-    const tagName = getTagName(node);
-    if (!tagName) {
-        errors.push('Could not resolve JSX tag name');
-        return;
-    }
-
-    const figmaType = COMPONENT_MAP[tagName];
-    if (!figmaType) {
-        // Treat unknown components as Frame (Button, Card, etc.)
-        errors.push(`Unknown component "${tagName}" — treating as FRAME`);
-    }
-
-    const type = figmaType || 'FRAME';
-    const props = extractProps(node, errors);
-    const children = getElementChildren(node);
-    const textContent = extractTextContent(node);
-
-    // --- SMART LAYOUT INFERENCE ENGINE (Web DOM Flow) ---
-    // If a structural frame has children, isn't explicitly absolute, and has no layout mode,
-    // we analyze its children to infer the correct web-like formatting context.
-    if (type === 'FRAME' && children.length > 0 && props.position !== 'absolute' && !props.layoutMode) {
-
-        const childTags = children.map(c => getTagName(c) || 'Frame');
-        const hasBlocks = childTags.some(t => ['Frame', 'AutoLayout', 'Group', 'Component'].includes(t));
-        const hasText = childTags.includes('Text');
-        const hasIcons = childTags.some(t => ['Ellipse', 'Line', 'Rectangle', 'Vector', 'Star', 'Polygon'].includes(t));
-
-        const isInteractive = ['Button', 'Input', 'Badge', 'Chip'].includes(tagName);
-
-        if (children.length === 1 && !hasBlocks) {
-            // Rule 1: Single Child Tight Wrapper
-            props.layoutMode = 'HORIZONTAL';
-            if (props.itemSpacing === undefined) props.itemSpacing = 0;
-            if (props.primaryAxisAlignItems === undefined) props.primaryAxisAlignItems = 'CENTER';
-            if (props.counterAxisAlignItems === undefined) props.counterAxisAlignItems = 'CENTER';
-
-        } else if (isInteractive) {
-            // Rule 2: Interactive Components
-            props.layoutMode = 'HORIZONTAL';
-            if (props.itemSpacing === undefined) props.itemSpacing = 8;
-            if (props.counterAxisAlignItems === undefined) props.counterAxisAlignItems = 'CENTER';
-
-        } else if (!hasBlocks && hasText && hasIcons) {
-            // Rule 3: Icon + Text Row
-            props.layoutMode = 'HORIZONTAL';
-            if (props.itemSpacing === undefined) props.itemSpacing = 8;
-            if (props.counterAxisAlignItems === undefined) props.counterAxisAlignItems = 'CENTER';
-
-        } else if (!hasBlocks && childTags.every(t => t === 'Text')) {
-            // Rule 4: Text Stack
-            props.layoutMode = 'VERTICAL';
-            if (props.itemSpacing === undefined) props.itemSpacing = 4;
-            if (props.width === undefined) props.width = 'fill';
-
-        } else {
-            // Rule 5: Structural Container
-            props.layoutMode = 'VERTICAL';
-            if (props.itemSpacing === undefined) props.itemSpacing = 16;
-            if (props.width === undefined && depth > 0) props.width = 'fill';
-        }
-    }
-    // ----------------------------------------------------
-
-    // For Text nodes, set characters from children text
-    if (type === 'TEXT' && textContent) {
-        props.characters = textContent;
-    }
-
-    // AutoLayout shorthand: if tag is AutoLayout, force layout
-    if (tagName === 'AutoLayout' && !props.layoutMode) {
-        props.layoutMode = 'VERTICAL';
-    }
-
-    const id = `${idPrefix}node_${commands.length}`;
-
-    // Build command
-    const cmd = {
-        command: 'node.create',
-        params: { id, type, props: { name: props.name || tagName, ...props } },
-    };
-
-    // If this is a child, reference parent
-    if (parentId) {
-        cmd.params.parentId = parentId;
-    }
-
-    commands.push(cmd);
-
-    // Process children (skip text-only children for TEXT nodes)
-    if (type !== 'TEXT') {
-        const children = getElementChildren(node);
-        for (const child of children) {
-            transformElement(child, commands, id, errors, depth + 1, idPrefix);
-        }
-    }
-}
-
-function getTagName(node) {
-    const name = node.openingElement?.name;
-    if (!name) return null;
-    if (name.type === 'JSXIdentifier') return name.name;
-    if (name.type === 'JSXMemberExpression') {
-        return `${name.object.name}.${name.property.name}`;
-    }
-    return null;
-}
-
-function extractProps(node, errors) {
+function parseProps(propsStr) {
     const props = {};
-    const attrs = node.openingElement?.attributes || [];
-
-    for (const attr of attrs) {
-        if (attr.type !== 'JSXAttribute') continue;
-
-        const rawKey = attr.name?.name;
-        if (!rawKey) continue;
-
-        const mappedKey = PROP_MAP[rawKey] || rawKey;
-        let value;
-
-        if (attr.value === null) {
-            // Boolean attribute: <Frame wrap />
-            value = true;
-        } else if (attr.value.type === 'Literal') {
-            value = attr.value.value;
-        } else if (attr.value.type === 'JSXExpressionContainer') {
-            value = evaluateExpression(attr.value.expression, errors);
-        } else {
-            errors.push(`Unsupported attribute value type for "${rawKey}"`);
-            continue;
+    const regex = /([a-zA-Z0-9_-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|{([^}]*)}))?/gs;
+    let match;
+    while ((match = regex.exec(propsStr)) !== null) {
+        const key = match[1];
+        let value = match[2] ?? match[3] ?? match[4] ?? true;
+        
+        if (typeof value === 'string') {
+            if (value === 'true') value = true;
+            else if (value === 'false') value = false;
         }
-
-        // --- COLLISION PREVENTION ---
-        // If the mappedKey (e.g., 'width') is already set by a primary prop
-        // and we are currently processing a secondary shorthand (e.g., 'w'),
-        // we skip the secondary to avoid overwriting "fill" with something else.
-        if (props[mappedKey] !== undefined && rawKey !== mappedKey) {
-            continue;
-        }
-
+        
+        const mappedKey = PROP_MAP[key] || key;
         props[mappedKey] = transformPropValue(mappedKey, value);
     }
-
     return props;
 }
 
-
-function evaluateExpression(expr, errors) {
-    if (expr.type === 'Literal') return expr.value;
-    if (expr.type === 'UnaryExpression' && expr.operator === '-' && expr.argument.type === 'Literal') {
-        return -expr.argument.value;
-    }
-    if (expr.type === 'TemplateLiteral' && expr.expressions.length === 0) {
-        return expr.quasis[0]?.value?.cooked || '';
-    }
-    if (expr.type === 'ObjectExpression') {
-        const obj = {};
-        for (const prop of expr.properties) {
-            const key = prop.key?.name || prop.key?.value;
-            obj[key] = evaluateExpression(prop.value, errors);
+/**
+ * Finds the actual end of an opening tag, skipping strings.
+ */
+function findEndOfTag(str) {
+    let inQuote = null;
+    let i = 0;
+    while (i < str.length) {
+        const char = str[i];
+        if ((char === '"' || char === "'") && (i === 0 || str[i-1] !== '\\')) {
+            if (!inQuote) inQuote = char;
+            else if (inQuote === char) inQuote = null;
+        } else if (char === '>' && !inQuote) {
+            return i;
         }
-        return obj;
+        i++;
     }
-    if (expr.type === 'ArrayExpression') {
-        return expr.elements.map(el => evaluateExpression(el, errors));
-    }
-    errors.push(`Cannot evaluate expression type: ${expr.type}`);
-    return undefined;
-}
-
-function extractTextContent(node) {
-    const children = node.children || [];
-    const textParts = [];
-
-    for (const child of children) {
-        if (child.type === 'JSXText') {
-            const trimmed = child.value.trim();
-            if (trimmed) textParts.push(trimmed);
-        }
-        if (child.type === 'JSXExpressionContainer' && child.expression.type === 'Literal') {
-            textParts.push(String(child.expression.value));
-        }
-    }
-
-    return textParts.length > 0 ? textParts.join(' ') : null;
-}
-
-function getElementChildren(node) {
-    return (node.children || []).filter(c => c.type === 'JSXElement');
+    return -1;
 }
 
 /**
- * Wrap parsed commands into a batch envelope.
+ * Balanced Tag Content Extractor
  */
+function extractContent(str, tagName, errors = []) {
+    let depth = 1;
+    let i = 0;
+    const closeTag = `</${tagName}>`;
+    const openTagStart = `<${tagName}`;
+
+    while (i < str.length && depth > 0) {
+        const remaining = str.slice(i);
+        if (remaining.startsWith(closeTag)) {
+            depth--;
+            if (depth === 0) return str.slice(0, i);
+            i += closeTag.length;
+        } else if (remaining.startsWith(openTagStart)) {
+            const nextChar = remaining[openTagStart.length];
+            if (nextChar === ' ' || nextChar === '>' || nextChar === '/') {
+                const endOfTag = findEndOfTag(remaining);
+                if (endOfTag !== -1) {
+                    const tagContent = remaining.slice(0, endOfTag + 1);
+                    if (!tagContent.endsWith('/>')) {
+                        depth++;
+                    }
+                    i += endOfTag + 1;
+                } else {
+                    i++;
+                }
+            } else {
+                i++;
+            }
+        } else {
+            i++;
+        }
+    }
+    
+    if (depth > 0) {
+        errors.push(`Unclosed tag: <${tagName}>`);
+    }
+    return str;
+}
+
+/**
+ * Command Generator
+ * parentId is yielded BEFORE children (parent-first order).
+ * IDs are deterministic based on seed (timestamp) + counter.
+ */
+export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp = 0, counter = { value: 0 }, errors = []) {
+    // We can't use a simple regex for finding the next tag because it might match inside strings.
+    // However, for design DSL, we usually don't have tags inside strings that look like <TagName.
+    // But let's be safer by searching manually or adjusting the regex.
+    
+    let lastIndex = 0;
+    while (lastIndex < jsx.length) {
+        const remaining = jsx.slice(lastIndex);
+        const openMatch = remaining.match(/<([A-Z][a-zA-Z0-9\.]*)/);
+        if (!openMatch) break;
+
+        const startIdxInRemaining = openMatch.index;
+        const startIdx = lastIndex + startIdxInRemaining;
+        const tagName = openMatch[1];
+        
+        // Find end of this tag
+        const endOfTagIdx = findEndOfTag(remaining.slice(startIdxInRemaining));
+        if (endOfTagIdx === -1) {
+            lastIndex = startIdx + openMatch[0].length;
+            continue;
+        }
+        
+        const fullTag = remaining.slice(startIdxInRemaining, startIdxInRemaining + endOfTagIdx + 1);
+        const isSelfClosing = fullTag.endsWith('/>');
+        const propsStr = fullTag.slice(openMatch[0].length, isSelfClosing ? -2 : -1).trim();
+
+        // Handle text nodes before this tag
+        const textBefore = jsx.slice(lastIndex, startIdx).trim();
+        if (textBefore && parentId) {
+            const textId = `${idPrefix}tmp_${timestamp}_${counter.value++}`;
+            yield {
+                command: 'node.create',
+                params: {
+                    id: textId,
+                    type: 'TEXT',
+                    parentId,
+                    props: { name: 'Text', characters: textBefore, width: 'fill' }
+                }
+            };
+        }
+
+        const type = COMPONENT_MAP[tagName] || 'FRAME';
+        const props = parseProps(propsStr);
+        const id = `${idPrefix}tmp_${timestamp}_${counter.value++}`;
+
+        const cmd = {
+            command: 'node.create',
+            params: { id, type, props: { name: props.name || tagName, ...props } },
+        };
+        if (parentId) cmd.params.parentId = parentId;
+        
+        yield cmd;
+
+        let endIdx = startIdx + fullTag.length;
+        if (!isSelfClosing) {
+            const afterOpen = jsx.slice(endIdx);
+            const content = extractContent(afterOpen, tagName, errors);
+            
+            if (type === 'TEXT') {
+                cmd.params.props.characters = content.trim();
+            } else {
+                yield* generateCommands(content, id, idPrefix, timestamp, counter, errors);
+            }
+            
+            const expectedClose = `</${tagName}>`;
+            if (afterOpen.slice(content.length).startsWith(expectedClose)) {
+                endIdx += content.length + expectedClose.length;
+            } else {
+                endIdx += content.length;
+            }
+        }
+
+        lastIndex = endIdx;
+    }
+
+    // Handle trailing text
+    const textAfter = jsx.slice(lastIndex).trim();
+    if (textAfter && parentId) {
+        const textId = `${idPrefix}tmp_${timestamp}_${counter.value++}`;
+        yield {
+            command: 'node.create',
+            params: {
+                id: textId,
+                type: 'TEXT',
+                parentId,
+                props: { name: 'Text', characters: textAfter, width: 'fill' }
+            }
+        };
+    }
+}
+
+/**
+ * Main entry points
+ */
+export function parseJSXStream(jsxString, idPrefix = "") {
+    const timestamp = 0; 
+    const errors = [];
+    const generator = generateCommands(jsxString, null, idPrefix, timestamp, { value: 0 }, errors);
+    return { generator, errors };
+}
+
+export function parseJSX(jsxString, idPrefix = "") {
+    const { generator, errors } = parseJSXStream(jsxString, idPrefix);
+    return { commands: Array.from(generator), errors };
+}
+
 export function toBatch(commands) {
     return {
         command: 'batch',

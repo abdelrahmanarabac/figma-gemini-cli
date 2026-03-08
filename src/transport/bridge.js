@@ -14,35 +14,50 @@ const DAEMON_URL = `http://127.0.0.1:${process.env.DAEMON_PORT || 3456}`;
  */
 export async function sendCommand(command, params = {}, opts = {}) {
     const timeout = opts.timeout || 30000;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
+    const maxRetries = opts.retries || 3;
+    let lastError;
 
-    try {
-        const res = await fetch(`${DAEMON_URL}/command`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ command, params }),
-            signal: controller.signal,
-        });
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeout);
 
-        const data = await res.json();
+        try {
+            const res = await fetch(`${DAEMON_URL}/command`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ command, params }),
+                signal: controller.signal,
+            });
 
-        if (!res.ok) {
-            throw new Error(data.error || `Daemon returned ${res.status}`);
+            const data = await res.json();
+
+            if (!res.ok) {
+                const errorMsg = data.error || `Daemon returned ${res.status}`;
+                throw new Error(`[Transport Error] Command: ${command} | Action: ${params.id || 'N/A'} | Details: ${errorMsg}`);
+            }
+
+            return data;
+        } catch (err) {
+            lastError = err;
+            if (err.name === 'AbortError') {
+                // If timed out, maybe the daemon is busy, retry?
+                continue;
+            }
+            if (err.cause?.code === 'ECONNREFUSED' || err.message.includes('fetch failed')) {
+                // If connection refused, wait a bit and retry (in case daemon is restarting)
+                await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+                continue;
+            }
+            throw err; // For other errors (parsing, etc.), fail early
+        } finally {
+            clearTimeout(timer);
         }
-
-        return data;
-    } catch (err) {
-        if (err.name === 'AbortError') {
-            throw new Error(`Command "${command}" timed out after ${timeout}ms`);
-        }
-        if (err.cause?.code === 'ECONNREFUSED') {
-            throw new Error('Daemon not running. Start with: figma-ds-cli connect');
-        }
-        throw err;
-    } finally {
-        clearTimeout(timer);
     }
+
+    if (lastError.cause?.code === 'ECONNREFUSED') {
+        throw new Error('[Connection Error] Daemon unreachable at ' + DAEMON_URL + '. Ensure the CLI daemon is running ("figma-gemini-cli connect").');
+    }
+    throw lastError;
 }
 
 /**
