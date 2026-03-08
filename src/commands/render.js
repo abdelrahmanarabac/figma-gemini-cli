@@ -214,8 +214,16 @@ class InspectCommand extends Command {
         function toJSX(node, indent = '') {
           const typeMap = { FRAME: 'Frame', RECTANGLE: 'Rectangle', ELLIPSE: 'Ellipse', TEXT: 'Text', LINE: 'Line' };
           const tag = typeMap[node.type] || 'Frame';
-          let props = Object.entries(node.props)
-            .filter(([_, v]) => v !== undefined)
+          
+          let propEntries = Object.entries(node.props).filter(([k, v]) => v !== undefined && k !== 'text');
+          // Prioritize ID
+          propEntries.sort(([ak], [bk]) => {
+            if (ak === 'id') return -1;
+            if (bk === 'id') return 1;
+            return 0;
+          });
+
+          let props = propEntries
             .map(([k, v]) => {
               if (typeof v === 'string') return `${k}="${v}"`;
               if (typeof v === 'number') return `${k}={${v}}`;
@@ -223,11 +231,15 @@ class InspectCommand extends Command {
             })
             .join(' ');
           
+          if (node.type === 'TEXT' && node.props.text) {
+             return `${indent}<${tag}${props ? ' ' + props : ''}>${node.props.text}</${tag}>`;
+          }
+
           if (node.children && node.children.length > 0) {
             const childJSX = node.children.map(c => toJSX(c, indent + '  ')).join('\n');
-            return `${indent}<${tag} ${props}>\n${childJSX}\n${indent}</${tag}>`;
+            return `${indent}<${tag}${props ? ' ' + props : ''}>\n${childJSX}\n${indent}</${tag}>`;
           }
-          return `${indent}<${tag} ${props} />`;
+          return `${indent}<${tag}${props ? ' ' + props : ''} />`;
         }
 
         ctx.logSuccess(`JSX Representation (${result.data.props.name}):`);

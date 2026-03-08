@@ -60,6 +60,10 @@ const PROP_MAP = {
     align: 'textAlignHorizontal',
     alignV: 'textAlignVertical',
     alignH: 'textAlignHorizontal',
+    strokeAlign: 'strokeAlign',
+    leading: 'lineHeight',
+    tracking: 'letterSpacing',
+    transform: 'textCase',
 };
 
 const NUMERIC_PROPS = new Set([
@@ -67,7 +71,7 @@ const NUMERIC_PROPS = new Set([
     'cornerRadius', 'itemSpacing', 'padding', 'paddingTop', 'paddingRight', 
     'paddingBottom', 'paddingLeft', 'paddingHorizontal', 'paddingVertical',
     'fontSize', 'fontWeight', 'opacity', 'x', 'y', 'rotation', 'strokeWidth',
-    'blur', 'backdropBlur'
+    'blur', 'backdropBlur', 'letterSpacing', 'lineHeight'
 ]);
 
 function transformPropValue(key, value, props) {
@@ -80,6 +84,21 @@ function transformPropValue(key, value, props) {
     if (key === 'primaryAxisAlignItems' || key === 'counterAxisAlignItems' || key === 'textAlignHorizontal' || key === 'textAlignVertical') {
         const map = { start: 'MIN', center: 'CENTER', end: 'MAX', between: 'SPACE_BETWEEN', left: 'LEFT', right: 'RIGHT', top: 'TOP', bottom: 'BOTTOM' };
         return map[value] || value;
+    }
+    if (key === 'strokeAlign') {
+        const map = { inside: 'INSIDE', outside: 'OUTSIDE', center: 'CENTER' };
+        return map[value] || value.toUpperCase();
+    }
+    if (key === 'textCase') {
+        const map = { uppercase: 'UPPER', lowercase: 'LOWER', capitalize: 'TITLE', none: 'ORIGINAL' };
+        return map[value] || value.toUpperCase();
+    }
+    if (key === 'letterSpacing' || key === 'lineHeight') {
+        // We handle these as numeric pixels for now in the plugin side
+        if (typeof value === 'string' && value.trim() !== '') {
+            const num = Number(value);
+            if (!isNaN(num)) return num;
+        }
     }
     if (key === 'width' || key === 'height') {
         if (value === 'fill') return 'fill';
@@ -256,7 +275,7 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
                     id: textId,
                     type: 'TEXT',
                     parentId,
-                    props: { name: 'Text', characters: textBefore, width: 'fill' }
+                    props: { name: 'Text', characters: textBefore }
                 }
             };
         }
@@ -318,7 +337,7 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
                 id: textId,
                 type: 'TEXT',
                 parentId,
-                props: { name: 'Text', characters: textAfter, width: 'fill' }
+                props: { name: 'Text', characters: textAfter }
             }
         };
     }

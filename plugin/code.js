@@ -377,6 +377,10 @@ async function createNodeTransaction(type, props, parentId) {
           node.strokes = [{ type: 'SOLID', color: c }];
         }
         node.strokeWeight = props.strokeWidth || 1;
+        if (props.strokeAlign && 'strokeAlign' in node) {
+          const alignMap = { inside: 'INSIDE', outside: 'OUTSIDE', center: 'CENTER' };
+          node.strokeAlign = alignMap[props.strokeAlign.toLowerCase()] || 'INSIDE';
+        }
       }
     }
   } catch (e) {
@@ -445,17 +449,17 @@ async function createNodeTransaction(type, props, parentId) {
     throw new Error(`Axis align failed: ${e.message}`);
   }
 
-  // 4. FIXED SIZING (Before Append)
+  // 4. SIZING (Before Append)
   try {
-    const isShapeOrFrame = (type === 'RECTANGLE' || type === 'ELLIPSE' || type === 'FRAME');
-    const defaultW = isShapeOrFrame ? 40 : (node.width || 100);
-    const defaultH = isShapeOrFrame ? 40 : (node.height || 100);
-
-    const targetW = (typeof props.width === 'number') ? props.width : defaultW;
-    const targetH = (typeof props.height === 'number') ? props.height : defaultH;
-    
-    if (typeof node.resize === 'function') {
-      node.resize(targetW, targetH);
+    // Only force a resize if numeric dimensions are provided.
+    // Otherwise, let Figma use its default (usually 100x100) or let Auto Layout handle it.
+    if (typeof props.width === 'number' || typeof props.height === 'number') {
+      const targetW = (typeof props.width === 'number') ? props.width : node.width;
+      const targetH = (typeof props.height === 'number') ? props.height : node.height;
+      
+      if (typeof node.resize === 'function') {
+        node.resize(targetW, targetH);
+      }
     }
   } catch (e) {
     console.warn('Initial resize failed:', e.message);
@@ -519,7 +523,14 @@ async function createNodeTransaction(type, props, parentId) {
     for (const s of siblings) if (s.id !== node.id) maxX = Math.max(maxX, s.x + s.width);
     if (maxX !== -Infinity && node.x === 0) node.x = maxX + 200;
   }
-  if (props.position === 'absolute' && 'layoutPositioning' in node) node.layoutPositioning = 'ABSOLUTE';
+  
+  if (props.position === 'absolute' && 'layoutPositioning' in node) {
+    const parentIsAL = parent && 'layoutMode' in parent && parent.layoutMode !== 'NONE';
+    if (parentIsAL) {
+      node.layoutPositioning = 'ABSOLUTE';
+    }
+  }
+  
   if (props.x !== undefined) node.x = props.x;
   if (props.y !== undefined) node.y = props.y;
 
@@ -624,6 +635,7 @@ async function serializeNode(node) {
   const hasALParent = node.parent && 'layoutMode' in node.parent && node.parent.layoutMode !== 'NONE';
 
   const props = {
+    id: node.id,
     name: node.name,
     opacity: node.opacity !== 1 ? parseFloat(node.opacity.toFixed(2)) : undefined,
   };
@@ -714,8 +726,32 @@ async function serializeNode(node) {
   }
 
   if (node.type === 'TEXT') {
-    props.characters = node.characters;
+    props.text = node.characters;
     props.size = node.fontSize;
+    
+    // Weight mapping
+    const style = node.fontName !== figma.mixed ? node.fontName.style.toLowerCase() : '';
+    if (style.includes('bold')) props.weight = 'bold';
+    else if (style.includes('medium')) props.weight = 'medium';
+    else if (style.includes('light')) props.weight = 'light';
+    else if (style.includes('thin')) props.weight = 'thin';
+
+    // Text Case (Transform)
+    if (node.textCase === 'UPPER') props.transform = 'uppercase';
+    else if (node.textCase === 'LOWER') props.transform = 'lowercase';
+    else if (node.textCase === 'TITLE') props.transform = 'capitalize';
+
+    // Letter Spacing (Tracking)
+    if (node.letterSpacing && node.letterSpacing.value !== 0) {
+       props.tracking = parseFloat(node.letterSpacing.value.toFixed(2));
+    }
+
+    // Line Height (Leading)
+    if (node.lineHeight && node.lineHeight.unit !== 'AUTO') {
+       if (node.lineHeight.unit === 'PIXELS') props.leading = parseFloat(node.lineHeight.value.toFixed(2));
+       else if (node.lineHeight.unit === 'PERCENT') props.leading = parseFloat((node.lineHeight.value / 100).toFixed(2));
+    }
+
     const hAlignMap = { 'LEFT': 'left', 'CENTER': 'center', 'RIGHT': 'right', 'JUSTIFIED': 'justify' };
     if (node.textAlignHorizontal !== 'LEFT') props.align = hAlignMap[node.textAlignHorizontal];
     const vAlignMap = { 'TOP': 'top', 'CENTER': 'center', 'BOTTOM': 'bottom' };
@@ -727,6 +763,11 @@ async function serializeNode(node) {
     for (const child of node.children) {
       children.push(await serializeNode(child));
     }
+  }
+
+  // 5. Stroke Details (Alignment)
+  if ('strokeAlign' in node && node.strokes.length > 0) {
+    props.strokeAlign = node.strokeAlign.toLowerCase();
   }
 
   return {
@@ -767,13 +808,18 @@ function serializeColor(color, opacity) {
   const g = Math.round(color.g * 255);
   const b = Math.round(color.b * 255);
   
-  // Snap to pure white/black
-  if (r > 250 && g > 250 && b > 250) return '#ffffff';
-  if (r < 5 && g < 5 && b < 5) return '#000000';
+  const hasOpacity = opacity !== undefined && opacity < 1;
 
-  if (opacity !== undefined && opacity < 1) {
-    return `rgba(${r},${g},${b},${parseFloat(opacity.toFixed(2))})`;
+  if (!hasOpacity) {
+    // Snap to pure white/black ONLY if no opacity
+    if (r > 250 && g > 250 && b > 250) return '#ffffff';
+    if (r < 5 && g < 5 && b < 5) return '#000000';
   }
+
+  if (hasOpacity) {
+    return `rgba(${r}, ${g}, ${b}, ${parseFloat(opacity.toFixed(2))})`;
+  }
+  
   return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
 }
 
@@ -792,6 +838,20 @@ async function applyPropsToNode(node, props) {
     node.fontName = { family: 'Inter', style };
     if (props.fontSize !== undefined) node.fontSize = props.fontSize;
     if (props.characters !== undefined) node.characters = props.characters;
+
+    // Advanced Typography
+    if (props.textCase !== undefined) {
+      const caseMap = { uppercase: 'UPPER', lowercase: 'LOWER', capitalize: 'TITLE', none: 'ORIGINAL' };
+      node.textCase = caseMap[props.textCase] || 'ORIGINAL';
+    }
+    if (props.letterSpacing !== undefined) {
+      node.letterSpacing = { value: props.letterSpacing, unit: 'PIXELS' };
+    }
+    if (props.lineHeight !== undefined) {
+       // Interpret numbers as multipliers if < 5, else pixels
+       if (props.lineHeight < 5) node.lineHeight = { value: props.lineHeight * 100, unit: 'PERCENT' };
+       else node.lineHeight = { value: props.lineHeight, unit: 'PIXELS' };
+    }
   }
 
   // Styling (Solid colors and Variable Bindings)
@@ -907,8 +967,27 @@ async function applyPropsToNode(node, props) {
     }
   }
 
-  if (props.width !== undefined && typeof props.width === 'number') node.resize(props.width, node.height);
-  if (props.height !== undefined && typeof props.height === 'number') node.resize(node.width, props.height);
+  if (props.width !== undefined) {
+    if (typeof props.width === 'number') {
+      if ('layoutSizingHorizontal' in node) node.layoutSizingHorizontal = 'FIXED';
+      node.resize(props.width, node.height);
+    } else if (props.width === 'fill' && node.parent && 'layoutMode' in node.parent && node.parent.layoutMode !== 'NONE') {
+      if ('layoutSizingHorizontal' in node) node.layoutSizingHorizontal = 'FILL';
+    } else if (props.width === 'hug') {
+      if ('layoutSizingHorizontal' in node) node.layoutSizingHorizontal = 'HUG';
+    }
+  }
+
+  if (props.height !== undefined) {
+    if (typeof props.height === 'number') {
+      if ('layoutSizingVertical' in node) node.layoutSizingVertical = 'FIXED';
+      node.resize(node.width, props.height);
+    } else if (props.height === 'fill' && node.parent && 'layoutMode' in node.parent && node.parent.layoutMode !== 'NONE') {
+      if ('layoutSizingVertical' in node) node.layoutSizingVertical = 'FILL';
+    } else if (props.height === 'hug') {
+      if ('layoutSizingVertical' in node) node.layoutSizingVertical = 'HUG';
+    }
+  }
 }
 
 figma.ui.onmessage = async (msg) => {
