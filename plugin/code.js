@@ -158,6 +158,15 @@ const handlers = {
     return { created: count, collection: collectionName };
   },
 
+  'eval': async (params) => {
+    try {
+      const result = await eval(`(async () => { ${params.code} })()`);
+      return result;
+    } catch (err) {
+      throw new Error(`Eval failed: ${err.message}`);
+    }
+  },
+
   'node.create': async (params) => {
     const node = await createNodeTransaction(params.type, params.props || {}, params.parentId);
     return { nodeId: node.id, name: node.name };
@@ -167,12 +176,24 @@ const handlers = {
     const registry = new Map();
     const results = [];
     for (const cmd of (params.commands || [])) {
-      if (cmd.command !== 'node.create') continue;
-      const p = Object.assign({}, cmd.params || {});
-      if (p.parentId && registry.has(p.parentId)) p.parentId = registry.get(p.parentId);
-      const node = await createNodeTransaction(p.type, p.props || {}, p.parentId);
-      if (p.id) registry.set(p.id, node.id);
-      results.push({ id: p.id, nodeId: node.id });
+      try {
+        if (cmd.command !== 'node.create') continue;
+        const p = {};
+        if (cmd.params) {
+          for (const key in cmd.params) {
+            p[key] = cmd.params[key];
+          }
+        }
+        if (p.parentId && registry.has(p.parentId)) p.parentId = registry.get(p.parentId);
+        const node = await createNodeTransaction(p.type, p.props || {}, p.parentId);
+        if (p.id) registry.set(p.id, node.id);
+        results.push({ id: p.id, nodeId: node.id });
+      } catch (err) {
+        console.error('[Batch Error]', err);
+        const typeStr = cmd.params ? cmd.params.type : 'N/A';
+        const idStr = cmd.params ? cmd.params.id : 'N/A';
+        throw new Error(`[Batch Error] Type: ${typeStr} | ID: ${idStr} | Details: ${err.message}`);
+      }
     }
     return { status: 'ok', nodes: results };
   },
@@ -202,7 +223,12 @@ const handlers = {
 
         for (const cmd of msg.items) {
           if (cmd.command === 'node.create') {
-            const p = Object.assign({}, cmd.params || {});
+            const p = {};
+      if (cmd.params) {
+        for (const key in cmd.params) {
+          p[key] = cmd.params[key];
+        }
+      }
             
             if (p.parentId && stream.registry.has(p.parentId)) {
               p.parentId = stream.registry.get(p.parentId);
@@ -281,57 +307,99 @@ async function createNodeTransaction(type, props, parentId) {
   if (props.name) node.name = props.name;
   
   if (node.type === 'TEXT') {
-    const weight = String(props.fontWeight || '400').toLowerCase();
-    const styleMap = {
-      '100': 'Thin', '200': 'Extra Light', '300': 'Light', '400': 'Regular',
-      '500': 'Medium', '600': 'Semi Bold', '700': 'Bold', '800': 'Extra Bold', '900': 'Black',
-      'thin': 'Thin', 'light': 'Light', 'regular': 'Regular', 'medium': 'Medium', 'bold': 'Bold', 'semibold': 'Semi Bold'
-    };
-    const style = styleMap[weight] || 'Regular';
-    await figma.loadFontAsync({ family: 'Inter', style });
-    node.fontName = { family: 'Inter', style };
-    if (props.fontSize !== undefined) node.fontSize = props.fontSize;
-    if (props.characters !== undefined) node.characters = props.characters;
+    try {
+      const weight = String(props.fontWeight || '400').toLowerCase();
+      const styleMap = {
+        '100': 'Thin', '200': 'Extra Light', '300': 'Light', '400': 'Regular',
+        '500': 'Medium', '600': 'Semi Bold', '700': 'Bold', '800': 'Extra Bold', '900': 'Black',
+        'thin': 'Thin', 'light': 'Light', 'regular': 'Regular', 'medium': 'Medium', 'bold': 'Bold', 'semibold': 'Semi Bold'
+      };
+      const style = styleMap[weight] || 'Regular';
+      await figma.loadFontAsync({ family: 'Inter', style });
+      node.fontName = { family: 'Inter', style };
+      if (props.fontSize !== undefined) node.fontSize = props.fontSize;
+      if (props.characters !== undefined) node.characters = props.characters;
+    } catch (e) {
+      throw new Error(`TEXT setup failed: ${e.message}`);
+    }
   }
 
   // Appearance
-  if (props.fill) {
-    const c = parseColor(props.fill);
-    if (c) node.fills = [{ type: 'SOLID', color: c }];
-  } else if (node.type === 'FRAME') {
-    node.fills = []; // Frames transparent by default
-  }
-  if (props.stroke) {
-    const c = parseColor(props.stroke);
-    if (c) {
-      node.strokes = [{ type: 'SOLID', color: c }];
-      node.strokeWeight = props.strokeWidth || 1;
+  try {
+    if (props.fill) {
+      const c = parseColor(props.fill);
+      if (c) node.fills = [{ type: 'SOLID', color: c }];
+    } else if (node.type === 'FRAME') {
+      node.fills = []; // Frames transparent by default
     }
+  } catch (e) {
+    throw new Error(`Fills setup failed: ${e.message}`);
   }
-  if (props.cornerRadius !== undefined) node.cornerRadius = props.cornerRadius;
-  if (props.opacity !== undefined) node.opacity = props.opacity;
+
+  try {
+    if (props.stroke) {
+      const c = parseColor(props.stroke);
+      if (c) {
+        node.strokes = [{ type: 'SOLID', color: c }];
+        node.strokeWeight = props.strokeWidth || 1;
+      }
+    }
+  } catch (e) {
+    throw new Error(`Stroke setup failed: ${e.message}`);
+  }
+
+  try {
+    if (props.cornerRadius !== undefined) node.cornerRadius = props.cornerRadius;
+    if (props.opacity !== undefined) node.opacity = props.opacity;
+  } catch (e) {
+    throw new Error(`Misc appearance failed: ${e.message}`);
+  }
 
   // 3. Layout CONFIG (Self)
-  if (props.layoutMode && 'layoutMode' in node) node.layoutMode = props.layoutMode;
-  if (props.itemSpacing !== undefined && 'itemSpacing' in node) node.itemSpacing = props.itemSpacing;
-  if (props.counterAxisSpacing !== undefined && 'counterAxisSpacing' in node) node.counterAxisSpacing = props.counterAxisSpacing;
-  if (props.layoutWrap && 'layoutWrap' in node) node.layoutWrap = props.layoutWrap;
+  try {
+    if (props.layoutMode && 'layoutMode' in node) node.layoutMode = props.layoutMode;
+    if (props.itemSpacing !== undefined && 'itemSpacing' in node) node.itemSpacing = props.itemSpacing;
+    if (props.counterAxisSpacing !== undefined && 'counterAxisSpacing' in node) node.counterAxisSpacing = props.counterAxisSpacing;
+    if (props.layoutWrap && 'layoutWrap' in node) node.layoutWrap = props.layoutWrap;
+  } catch (e) {
+    throw new Error(`Layout config failed: ${e.message}`);
+  }
   
   // Padding
-  if (props.padding !== undefined) node.paddingTop = node.paddingRight = node.paddingBottom = node.paddingLeft = props.padding;
-  if (props.paddingHorizontal !== undefined) node.paddingLeft = node.paddingRight = props.paddingHorizontal;
-  if (props.paddingVertical !== undefined) node.paddingTop = node.paddingBottom = props.paddingVertical;
-  if (props.paddingTop !== undefined) node.paddingTop = props.paddingTop;
-  if (props.paddingRight !== undefined) node.paddingRight = props.paddingRight;
-  if (props.paddingBottom !== undefined) node.paddingBottom = props.paddingBottom;
-  if (props.paddingLeft !== undefined) node.paddingLeft = props.paddingLeft;
+  try {
+    if (props.padding !== undefined && 'paddingTop' in node) node.paddingTop = node.paddingRight = node.paddingBottom = node.paddingLeft = props.padding;
+    if (props.paddingHorizontal !== undefined && 'paddingLeft' in node) node.paddingLeft = node.paddingRight = props.paddingHorizontal;
+    if (props.paddingVertical !== undefined && 'paddingTop' in node) node.paddingTop = node.paddingBottom = props.paddingVertical;
+    if (props.paddingTop !== undefined && 'paddingTop' in node) node.paddingTop = props.paddingTop;
+    if (props.paddingRight !== undefined && 'paddingRight' in node) node.paddingRight = props.paddingRight;
+    if (props.paddingBottom !== undefined && 'paddingBottom' in node) node.paddingBottom = props.paddingBottom;
+    if (props.paddingLeft !== undefined && 'paddingLeft' in node) node.paddingLeft = props.paddingLeft;
+  } catch (e) {
+    throw new Error(`Padding failed: ${e.message}`);
+  }
 
-  if (props.primaryAxisAlignItems && 'primaryAxisAlignItems' in node) node.primaryAxisAlignItems = props.primaryAxisAlignItems;
-  if (props.counterAxisAlignItems && 'counterAxisAlignItems' in node) node.counterAxisAlignItems = props.counterAxisAlignItems;
+  try {
+    if (props.primaryAxisAlignItems && 'primaryAxisAlignItems' in node) node.primaryAxisAlignItems = props.primaryAxisAlignItems;
+    if (props.counterAxisAlignItems && 'counterAxisAlignItems' in node) node.counterAxisAlignItems = props.counterAxisAlignItems;
+  } catch (e) {
+    throw new Error(`Axis align failed: ${e.message}`);
+  }
 
   // 4. FIXED SIZING (Before Append)
-  if (typeof props.width === 'number') node.resize(props.width, node.height);
-  if (typeof props.height === 'number') node.resize(node.width, props.height);
+  try {
+    const isShapeOrFrame = (type === 'RECTANGLE' || type === 'ELLIPSE' || type === 'FRAME');
+    const defaultW = isShapeOrFrame ? 40 : (node.width || 100);
+    const defaultH = isShapeOrFrame ? 40 : (node.height || 100);
+
+    const targetW = (typeof props.width === 'number') ? props.width : defaultW;
+    const targetH = (typeof props.height === 'number') ? props.height : defaultH;
+    
+    if (typeof node.resize === 'function') {
+      node.resize(targetW, targetH);
+    }
+  } catch (e) {
+    console.warn('Initial resize failed:', e.message);
+  }
 
   // 5. APPEND
   if (parent && 'appendChild' in parent) {
@@ -349,10 +417,10 @@ async function createNodeTransaction(type, props, parentId) {
         node.resize(props.width, node.height);
       } else if (props.width === 'fill' && hasALParent) {
         node.layoutSizingHorizontal = 'FILL';
-      } else if (props.width === 'hug') {
+      } else if (props.width === 'hug' || node.type === 'TEXT' || isALFrame) {
         node.layoutSizingHorizontal = 'HUG';
-      } else if (isALFrame || node.type === 'TEXT') {
-        node.layoutSizingHorizontal = 'HUG';
+      } else {
+        node.layoutSizingHorizontal = 'FIXED';
       }
     } catch (e) {
       console.warn('Failed to set horizontal sizing:', e.message);
@@ -365,10 +433,10 @@ async function createNodeTransaction(type, props, parentId) {
         node.resize(node.width, props.height);
       } else if (props.height === 'fill' && hasALParent) {
         node.layoutSizingVertical = 'FILL';
-      } else if (props.height === 'hug') {
+      } else if (props.height === 'hug' || node.type === 'TEXT' || isALFrame) {
         node.layoutSizingVertical = 'HUG';
-      } else if (isALFrame || node.type === 'TEXT') {
-        node.layoutSizingVertical = 'HUG';
+      } else {
+        node.layoutSizingVertical = 'FIXED';
       }
     } catch (e) {
       console.warn('Failed to set vertical sizing:', e.message);
@@ -376,10 +444,12 @@ async function createNodeTransaction(type, props, parentId) {
   }
 
   // Text Auto-resize
-  if (node.type === 'TEXT') {
-    if (props.width === 'fill') node.textAutoResize = 'HEIGHT';
-    else if (typeof props.width === 'number') node.textAutoResize = 'HEIGHT';
-    else node.textAutoResize = 'WIDTH_AND_HEIGHT';
+  if (node.type === 'TEXT' && 'textAutoResize' in node) {
+    if (props.width === 'fill' || typeof props.width === 'number') {
+      node.textAutoResize = 'HEIGHT';
+    } else {
+      node.textAutoResize = 'WIDTH_AND_HEIGHT';
+    }
   }
 
   // 7. ROOT POSITIONING

@@ -5,6 +5,7 @@ import { pathToFileURL } from 'url';
 import chalk from 'chalk';
 import { CommandContext } from './context.js';
 import { Command } from './command.js';
+import { detectAndDocumentError } from '../utils/error-memory.js';
 
 export class CliRouter {
   /**
@@ -126,6 +127,7 @@ export class CliRouter {
         await commandInstance.execute(ctx, allOptions, ...commandArgs);
       } catch (err) {
         ctx.logError(err.message);
+        detectAndDocumentError(err.message);
         process.exitCode = 1;
       } finally {
         await ctx.close();

@@ -55,6 +55,9 @@ const PROP_MAP = {
     shadow: 'shadow',
     blur: 'blur',
     overflow: 'clipsContent',
+    align: 'textAlignHorizontal',
+    alignV: 'textAlignVertical',
+    alignH: 'textAlignHorizontal',
 };
 
 const NUMERIC_PROPS = new Set([
@@ -71,22 +74,21 @@ function transformPropValue(key, value, props) {
         return value;
     }
     if (key === 'layoutWrap' && value === true) return 'WRAP';
-    if (key === 'primaryAxisAlignItems' || key === 'counterAxisAlignItems') {
-        const map = { start: 'MIN', center: 'CENTER', end: 'MAX', between: 'SPACE_BETWEEN' };
+    if (key === 'primaryAxisAlignItems' || key === 'counterAxisAlignItems' || key === 'textAlignHorizontal' || key === 'textAlignVertical') {
+        const map = { start: 'MIN', center: 'CENTER', end: 'MAX', between: 'SPACE_BETWEEN', left: 'LEFT', right: 'RIGHT', top: 'TOP', bottom: 'BOTTOM' };
         return map[value] || value;
     }
     if (key === 'width' || key === 'height') {
         if (value === 'fill') return 'fill';
         if (value === 'hug') return 'hug';
-        return value;
     }
     if (key === 'fontWeight') {
         const map = { thin: 100, light: 300, regular: 400, normal: 400, medium: 500, semibold: 600, bold: 700, extrabold: 800, black: 900 };
         return map[value] || value;
     }
-    if (NUMERIC_PROPS.has(key) && typeof value === 'string') {
+    if (NUMERIC_PROPS.has(key) && typeof value === 'string' && value.trim() !== '') {
         const num = Number(value);
-        return isNaN(num) ? value : num;
+        if (!isNaN(num)) return num;
     }
     return value;
 }
@@ -97,11 +99,17 @@ function transformPropValue(key, value, props) {
  */
 function parseProps(propsStr) {
     const props = {};
-    const regex = /([a-zA-Z0-9_-]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|{([^}]*)}))?/gs;
+    const regex = /([a-zA-Z0-9_-]+)(?:\s*=\s*(?:"((?:\\.|[^"])*)"|'((?:\\.|[^'])*)'|{([^}]*)}))?/gs;
     let match;
     while ((match = regex.exec(propsStr)) !== null) {
         const key = match[1];
-        let value = match[2] ?? match[3] ?? match[4] ?? true;
+        let rawValue = match[2] ?? match[3] ?? match[4] ?? true;
+        let value = rawValue;
+
+        if (typeof value === 'string' && (match[2] !== undefined || match[3] !== undefined)) {
+            // Unescape quotes if it was a quoted string
+            value = value.replace(/\\"/g, '"').replace(/\\'/g, "'");
+        }
         
         if (typeof value === 'string') {
             if (value === 'true') value = true;
@@ -181,13 +189,13 @@ function extractContent(str, tagName, errors = []) {
  * IDs are deterministic based on seed (timestamp) + counter.
  */
 export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp = 0, counter = { value: 0 }, errors = []) {
-    // We can't use a simple regex for finding the next tag because it might match inside strings.
-    // However, for design DSL, we usually don't have tags inside strings that look like <TagName.
-    // But let's be safer by searching manually or adjusting the regex.
+    // 1. Clean JSX: Strip comments and normalise
+    // Specifically target {/* comment */} style
+    let cleanJsx = jsx.replace(/{\/\*[\s\S]*?\*\/}/g, '');
     
     let lastIndex = 0;
-    while (lastIndex < jsx.length) {
-        const remaining = jsx.slice(lastIndex);
+    while (lastIndex < cleanJsx.length) {
+        const remaining = cleanJsx.slice(lastIndex);
         const openMatch = remaining.match(/<([A-Z][a-zA-Z0-9\.]*)/);
         if (!openMatch) break;
 
@@ -207,7 +215,9 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
         const propsStr = fullTag.slice(openMatch[0].length, isSelfClosing ? -2 : -1).trim();
 
         // Handle text nodes before this tag
-        const textBefore = jsx.slice(lastIndex, startIdx).trim();
+        const rawTextBefore = cleanJsx.slice(lastIndex, startIdx);
+        const textBefore = rawTextBefore.trim();
+        // ONLY yield text if it's not just whitespace
         if (textBefore && parentId) {
             const textId = `${idPrefix}tmp_${timestamp}_${counter.value++}`;
             yield {
@@ -235,7 +245,7 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
 
         let endIdx = startIdx + fullTag.length;
         if (!isSelfClosing) {
-            const afterOpen = jsx.slice(endIdx);
+            const afterOpen = cleanJsx.slice(endIdx);
             const content = extractContent(afterOpen, tagName, errors);
             
             if (type === 'TEXT') {
@@ -256,7 +266,7 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
     }
 
     // Handle trailing text
-    const textAfter = jsx.slice(lastIndex).trim();
+    const textAfter = cleanJsx.slice(lastIndex).trim();
     if (textAfter && parentId) {
         const textId = `${idPrefix}tmp_${timestamp}_${counter.value++}`;
         yield {

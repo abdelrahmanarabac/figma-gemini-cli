@@ -120,4 +120,140 @@ class RenderBatchCommand extends Command {
   }
 }
 
-export default [new RenderCommand(), new RenderBatchCommand()];
+class EvalCommand extends Command {
+  name = 'eval [code]';
+  description = 'Execute JavaScript in Figma';
+  needsConnection = true;
+
+  async execute(ctx, options, code) {
+    if (!code) {
+      ctx.logError('Usage: eval "figma.root.name"');
+      return;
+    }
+    try {
+      const result = await ctx.eval(code);
+      ctx.logSuccess('Executed', result);
+    } catch (err) {
+      ctx.logError(`Eval error: ${err.message}`);
+    }
+  }
+}
+
+class FindCommand extends Command {
+  name = 'find <query>';
+  description = 'Find nodes by name';
+  needsConnection = true;
+
+  async execute(ctx, options, query) {
+    try {
+      const code = `
+        const nodes = figma.currentPage.findAll(n => n.name.includes("${query}"));
+        return nodes.map(n => ({ id: n.id, name: n.name, type: n.type }));
+      `;
+      const result = await ctx.eval(code);
+      if (result && result.length > 0) {
+        ctx.logSuccess(`Found ${result.length} nodes:`, result);
+      } else {
+        ctx.logWarning('No nodes found.');
+      }
+    } catch (err) {
+      ctx.logError(`Find error: ${err.message}`);
+    }
+  }
+}
+
+class GetCommand extends Command {
+  name = 'get <id>';
+  description = 'Get node properties';
+  needsConnection = true;
+
+  async execute(ctx, options, id) {
+    try {
+      const code = `
+        const n = await figma.getNodeByIdAsync("${id}");
+        if (!n) return null;
+        return { 
+          id: n.id, 
+          name: n.name, 
+          type: n.type, 
+          x: n.x, y: n.y, 
+          width: n.width, height: n.height 
+        };
+      `;
+      const result = await ctx.eval(code);
+      if (result) {
+        ctx.logSuccess('Node info:', result);
+      } else {
+        ctx.logError(`Node ${id} not found.`);
+      }
+    } catch (err) {
+      ctx.logError(`Get error: ${err.message}`);
+    }
+  }
+}
+
+class NodeCommand extends Command {
+  name = 'node <action> [ids...]';
+  description = 'Node operations: to-component, delete';
+  needsConnection = true;
+
+  async execute(ctx, options, action, ...ids) {
+    if (!ids || ids.length === 0) {
+      ctx.logError('Usage: node <action> <id1> [id2...]');
+      return;
+    }
+
+    try {
+      let code = '';
+      if (action === 'to-component') {
+        code = `
+          const ids = "${ids.join(',')}".split(',');
+          const results = [];
+          for (const id of ids) {
+            const n = await figma.getNodeByIdAsync(id);
+            if (!n) { results.push({ id, error: 'Not found' }); continue; }
+            try {
+              const comp = figma.createComponent();
+              comp.name = n.name;
+              comp.resize(n.width, n.height);
+              comp.x = n.x; comp.y = n.y;
+              if (n.parent) n.parent.appendChild(comp);
+              comp.appendChild(n);
+              n.x = 0; n.y = 0;
+              results.push({ id, componentId: comp.id });
+            } catch(e) { results.push({ id, error: e.message }); }
+          }
+          return results;
+        `;
+      } else if (action === 'delete') {
+        code = `
+          const ids = "${ids.join(',')}".split(',');
+          const results = [];
+          for (const id of ids) {
+            const n = await figma.getNodeByIdAsync(id);
+            if (n) { n.remove(); results.push({ id, deleted: true }); }
+            else { results.push({ id, deleted: false }); }
+          }
+          return results;
+        `;
+      } else {
+        ctx.logError(`Unknown action: ${action}`);
+        return;
+      }
+
+      const result = await ctx.eval(code);
+      ctx.logSuccess(`Executed ${action}`, result);
+    } catch (err) {
+      ctx.logError(`Node error: ${err.message}`);
+    }
+  }
+}
+
+export default [
+  new RenderCommand(), 
+  new RenderBatchCommand(), 
+  new EvalCommand(), 
+  new FindCommand(), 
+  new GetCommand(), 
+  new NodeCommand()
+];

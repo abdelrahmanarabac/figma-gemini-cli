@@ -14,6 +14,8 @@ You are the lead architect for the `figma-gemini-cli`. Your goal is to generate 
 
 ### 2. High-Fidelity Designer Standards
 - **Modern Aesthetics**: Use `rounded={12}`, `p={24}`, and `gap={16}` as professional defaults.
+- **Explicit Sizing (NON-NEGOTIABLE)**: **ALL Frames MUST have `w` and `h` values defined upon creation.** Figma API defaults all new Frames to `100x100`, which causes immediate layout fragmentation. You MUST NOT omit these properties. Every single `<Frame>` requires an explicit `w={...}` and `h={...}` (use numbers, `fill`, or `hug`).
+- **Root Frame Sizing (ABSOLUTE)**: The outermost root `<Frame>` MUST always have fixed numeric dimensions (e.g., `w={1440} h={1024}` or `w={120} h={240}`) to define the design's viewport. NEVER use `fill` or `hug` on the top-level root frame.
 - **Sizing Keywords**: 
   - Use `w={fill}` and `h={fill}` for "Fill container".
   - Use `w={hug}` and `h={hug}` for "Hug contents".
@@ -58,3 +60,18 @@ You are the lead architect for the `figma-gemini-cli`. Your goal is to generate 
 2. Did I use `w={fill}` and `h={hug}` for main containers?
 3. Did I avoid using the deprecated `FigmaClient`?
 4. If the prompt was vague, did I provide the CLI's help menu instead of searching?
+
+## Known CLI Issue: PowerShell `&&` Operator
+
+Problem:
+Windows PowerShell does not support `&&` command chaining like Bash.
+
+Solution:
+Use separate commands instead:
+
+```powershell
+command1
+command2
+```
+
+Or run the CLI inside **Git Bash / WSL / modern PowerShell**.
