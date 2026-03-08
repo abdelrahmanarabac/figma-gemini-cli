@@ -4,19 +4,16 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Figma](https://img.shields.io/badge/Figma-Desktop-blue.svg)](https://www.figma.com/)
 
-A professional Node.js-based command-line interface that provides direct, programmatic control over the Figma Desktop application. By utilizing either a patched Chrome DevTools Protocol (CDP) connection or a local WebSocket-bridged plugin environment, it enables lightning-fast batch operations, AI-driven design generation, and advanced token management without the latency of the official Web API.
+A professional Node.js-based command-line interface that provides direct, programmatic control over the Figma Desktop application. By utilizing a secure, local WebSocket-bridged plugin environment, it enables lightning-fast batch operations, AI-driven design generation, and advanced token management with absolute production stability.
 
 ---
 
 ## 🚀 Key Features
 
-*   **Dual-Mode Connection**: 
-    *   **Yolo Mode (CDP)**: Direct control via Chrome DevTools Protocol for maximum speed.
-    *   **Safe Mode (Plugin)**: Secure communication via a local WebSocket bridge using a custom Figma plugin.
+*   **Secure Plugin Architecture**: Uses a local WebSocket bridge to communicate with a dedicated Figma plugin, ensuring no risk to the Figma binary.
 *   **AI Design Generation**: Leverage Google Gemini to transform natural language prompts into native Figma layouts and components.
 *   **High-Performance JSX Engine**: Render complex UI structures using a specialized JSX-to-Figma AST parser.
 *   **Advanced Token Management**: Instant injection of industry-standard palettes (Tailwind CSS, Radix UI, Shadcn/UI) and custom design tokens.
-*   **FigJam Integration**: Native support for FigJam operations, including automated sticky note creation and page management.
 *   **Architecture-First Design**: Decoupled transport layers and a command-based routing system for high maintainability.
 
 ---
@@ -89,12 +86,6 @@ A professional Node.js-based command-line interface that provides direct, progra
 | `tokens preset shadcn` | Creates primitive and semantic token sets for shadcn/ui. |
 | `tokens spacing` | Generates a 4px-base spacing scale. |
 
-### FigJam
-| Command | Description |
-| :--- | :--- |
-| `fj pages` | Lists all open FigJam pages. |
-| `fj sticky "text"` | Creates a sticky note at specific coordinates. |
-
 ---
 
 ## 🏗 Project Architecture
@@ -103,7 +94,7 @@ The project is built on a modular architecture designed for performance and exte
 
 *   **`src/cli/`**: The framework layer, handling command routing, dependency injection, and execution context.
 *   **`src/commands/`**: Pure command implementations. Each file represents a domain-specific capability.
-*   **`src/core/`**: The engine room. Contains the CDP client (`figma-client.js`) and AI integration logic.
+*   **`src/core/`**: The engine room. Contains the Gemini AI integration logic.
 *   **`src/transport/`**: Manages the communication lifecycle between the CLI and the Figma VM via a background daemon.
 *   **`src/parser/`**: A custom JSX parser that maps declarative attributes to native Figma API methods.
 *   **`plugin/`**: The bridge between the system and the Figma environment.
@@ -118,15 +109,6 @@ Pre-bundled palettes include:
 *   **Tailwind CSS**: 240+ professional color primitives.
 *   **Radix UI**: 156 color steps across 13 families.
 *   **Shadcn/UI**: Ready-to-use semantic tokens for Light and Dark modes.
-
----
-
-## 🛣 Roadmap
-
-- [ ] **Component Export**: Programmatically extract Figma components into React/Tailwind code.
-- [ ] **Multi-File Sync**: Synchronize tokens across multiple Figma files simultaneously.
-- [ ] **Advanced AI Prototyping**: Support for multi-step AI design iterations.
-- [ ] **Plugin UI Expansion**: Real-time log monitoring directly inside the Figma plugin.
 
 ---
 
