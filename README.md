@@ -52,7 +52,9 @@ cd figma-gemini-cli
 # 3. Install project dependencies
 npm install
 
-# 4. Install the Figma Plugin
+# 4. gemini
+
+# 5. Install the Figma Plugin by
 # - Open Figma Desktop
 # - Go to Plugins -> Development -> Import plugin from manifest...
 # - Select 'plugin/manifest.json' from this folder
