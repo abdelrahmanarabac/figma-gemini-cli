@@ -102,25 +102,56 @@ function transformPropValue(key, value, props) {
  */
 function parseProps(propsStr) {
     const props = {};
-    const regex = /([a-zA-Z0-9_-]+)(?:\s*=\s*(?:"((?:\\.|[^"])*)"|'((?:\\.|[^'])*)'|{([^}]*)}))?/gs;
-    let match;
-    while ((match = regex.exec(propsStr)) !== null) {
-        const key = match[1];
-        let rawValue = match[2] ?? match[3] ?? match[4] ?? true;
-        let value = rawValue;
-
-        if (typeof value === 'string' && (match[2] !== undefined || match[3] !== undefined)) {
-            // Unescape quotes if it was a quoted string
-            value = value.replace(/\\"/g, '"').replace(/\\'/g, "'");
+    let i = 0;
+    while (i < propsStr.length) {
+        const char = propsStr[i];
+        if (/[a-zA-Z0-9_-]/.test(char)) {
+            let keyStart = i;
+            while (i < propsStr.length && /[a-zA-Z0-9_-]/.test(propsStr[i])) i++;
+            const key = propsStr.slice(keyStart, i);
+            
+            while (i < propsStr.length && /\s/.test(propsStr[i])) i++;
+            if (propsStr[i] === '=') {
+                i++;
+                while (i < propsStr.length && /\s/.test(propsStr[i])) i++;
+                let value;
+                if (propsStr[i] === '"' || propsStr[i] === "'") {
+                    const quote = propsStr[i];
+                    i++;
+                    let valStart = i;
+                    while (i < propsStr.length && (propsStr[i] !== quote || propsStr[i-1] === '\\')) i++;
+                    value = propsStr.slice(valStart, i).replace(/\\"/g, '"').replace(/\\'/g, "'");
+                    i++;
+                } else if (propsStr[i] === '{') {
+                    i++;
+                    let valStart = i;
+                    let braceDepth = 1;
+                    while (i < propsStr.length && braceDepth > 0) {
+                        if (propsStr[i] === '{') braceDepth++;
+                        else if (propsStr[i] === '}') braceDepth--;
+                        if (braceDepth > 0) i++;
+                    }
+                    value = propsStr.slice(valStart, i);
+                    i++;
+                    
+                    // Attempt to parse JSON or literal
+                    if (value === 'true') value = true;
+                    else if (value === 'false') value = false;
+                    else if (!isNaN(Number(value)) && value.trim() !== '') value = Number(value);
+                } else {
+                    // Bare value
+                    let valStart = i;
+                    while (i < propsStr.length && !/\s/.test(propsStr[i])) i++;
+                    value = propsStr.slice(valStart, i);
+                }
+                const mappedKey = PROP_MAP[key] || key;
+                props[mappedKey] = transformPropValue(mappedKey, value, props);
+            } else {
+                props[PROP_MAP[key] || key] = true;
+            }
+        } else {
+            i++;
         }
-        
-        if (typeof value === 'string') {
-            if (value === 'true') value = true;
-            else if (value === 'false') value = false;
-        }
-        
-        const mappedKey = PROP_MAP[key] || key;
-        props[mappedKey] = transformPropValue(mappedKey, value, props);
     }
     return props;
 }
@@ -154,17 +185,16 @@ function extractContent(str, tagName, errors = []) {
     const openTagStart = `<${tagName}`;
 
     while (i < str.length && depth > 0) {
-        const remaining = str.slice(i);
-        if (remaining.startsWith(closeTag)) {
+        if (str.slice(i).startsWith(closeTag)) {
             depth--;
             if (depth === 0) return str.slice(0, i);
             i += closeTag.length;
-        } else if (remaining.startsWith(openTagStart)) {
-            const nextChar = remaining[openTagStart.length];
+        } else if (str.slice(i).startsWith(openTagStart)) {
+            const nextChar = str[i + openTagStart.length];
             if (nextChar === ' ' || nextChar === '>' || nextChar === '/') {
-                const endOfTag = findEndOfTag(remaining);
+                const endOfTag = findEndOfTag(str.slice(i));
                 if (endOfTag !== -1) {
-                    const tagContent = remaining.slice(0, endOfTag + 1);
+                    const tagContent = str.slice(i, i + endOfTag + 1);
                     if (!tagContent.endsWith('/>')) {
                         depth++;
                     }
@@ -193,7 +223,6 @@ function extractContent(str, tagName, errors = []) {
  */
 export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp = 0, counter = { value: 0 }, errors = []) {
     // 1. Clean JSX: Strip comments and normalise
-    // Specifically target {/* comment */} style
     let cleanJsx = jsx.replace(/{\/\*[\s\S]*?\*\/}/g, '');
     
     let lastIndex = 0;
@@ -218,9 +247,7 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
         const propsStr = fullTag.slice(openMatch[0].length, isSelfClosing ? -2 : -1).trim();
 
         // Handle text nodes before this tag
-        const rawTextBefore = cleanJsx.slice(lastIndex, startIdx);
-        const textBefore = rawTextBefore.trim();
-        // ONLY yield text if it's not just whitespace
+        const textBefore = cleanJsx.slice(lastIndex, startIdx).trim();
         if (textBefore && parentId) {
             const textId = `${idPrefix}tmp_${timestamp}_${counter.value++}`;
             yield {
@@ -249,19 +276,32 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
         let endIdx = startIdx + fullTag.length;
         if (!isSelfClosing) {
             const afterOpen = cleanJsx.slice(endIdx);
-            const content = extractContent(afterOpen, tagName, errors);
             
+            let content;
             if (type === 'TEXT') {
-                cmd.params.props.characters = content.trim();
+                // For TEXT components, search for the NEXT literal </Text> or </tagName>
+                const closeTag = `</${tagName}>`;
+                const closeIdx = afterOpen.indexOf(closeTag);
+                if (closeIdx !== -1) {
+                    content = afterOpen.slice(0, closeIdx);
+                    cmd.params.props.characters = content.trim();
+                    endIdx += closeIdx + closeTag.length;
+                } else {
+                    errors.push(`Unclosed TEXT tag: <${tagName}>`);
+                    content = afterOpen;
+                    cmd.params.props.characters = content.trim();
+                    endIdx += content.length;
+                }
             } else {
+                content = extractContent(afterOpen, tagName, errors);
                 yield* generateCommands(content, id, idPrefix, timestamp, counter, errors);
-            }
-            
-            const expectedClose = `</${tagName}>`;
-            if (afterOpen.slice(content.length).startsWith(expectedClose)) {
-                endIdx += content.length + expectedClose.length;
-            } else {
-                endIdx += content.length;
+                
+                const expectedClose = `</${tagName}>`;
+                if (afterOpen.slice(content.length).startsWith(expectedClose)) {
+                    endIdx += content.length + expectedClose.length;
+                } else {
+                    endIdx += content.length;
+                }
             }
         }
 

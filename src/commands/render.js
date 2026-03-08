@@ -147,7 +147,8 @@ class FindCommand extends Command {
   async execute(ctx, options, query) {
     try {
       const code = `
-        const nodes = figma.currentPage.findAll(n => n.name.includes("${query}"));
+        const query = ${JSON.stringify(query)};
+        const nodes = figma.currentPage.findAll(n => n.name.includes(query));
         return nodes.map(n => ({ id: n.id, name: n.name, type: n.type }));
       `;
       const result = await ctx.eval(code);
@@ -171,8 +172,9 @@ class GetCommand extends Command {
     try {
       const code = `
         let n;
-        if ("${id || ''}" && "${id || ''}" !== "undefined") {
-          n = await figma.getNodeByIdAsync("${id}");
+        const id = ${JSON.stringify(id)};
+        if (id && id !== "undefined") {
+          n = await figma.getNodeByIdAsync(id);
         } else {
           n = figma.currentPage.selection[0];
         }
@@ -216,6 +218,7 @@ class InspectCommand extends Command {
             .filter(([_, v]) => v !== undefined)
             .map(([k, v]) => {
               if (typeof v === 'string') return `${k}="${v}"`;
+              if (typeof v === 'number') return `${k}={${v}}`;
               return `${k}={${JSON.stringify(v)}}`;
             })
             .join(' ');

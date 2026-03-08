@@ -621,94 +621,105 @@ function parseInnerShadow(str) {
 }
 
 async function serializeNode(node) {
+  const hasALParent = node.parent && 'layoutMode' in node.parent && node.parent.layoutMode !== 'NONE';
+
   const props = {
     name: node.name,
-    w: Math.round(node.width),
-    h: Math.round(node.height),
-    x: Math.round(node.x),
-    y: Math.round(node.y),
     opacity: node.opacity !== 1 ? parseFloat(node.opacity.toFixed(2)) : undefined,
   };
 
+  // 1. Sizing & Constraints
+  if ('layoutSizingHorizontal' in node) {
+    if (node.layoutSizingHorizontal === 'FILL') props.w = 'fill';
+    else if (node.layoutSizingHorizontal === 'HUG') props.w = 'hug';
+    else props.w = Math.round(node.width);
+  } else {
+    props.w = Math.round(node.width);
+  }
+
+  if ('minWidth' in node && node.minWidth !== null && node.minWidth !== 0) props.minW = Math.round(node.minWidth);
+  if ('maxWidth' in node && node.maxWidth !== null && node.maxWidth !== Infinity) props.maxW = Math.round(node.maxWidth);
+
+  if ('layoutSizingVertical' in node) {
+    if (node.layoutSizingVertical === 'FILL') props.h = 'fill';
+    else if (node.layoutSizingVertical === 'HUG') props.h = 'hug';
+    else props.h = Math.round(node.height);
+  } else {
+    props.h = Math.round(node.height);
+  }
+
+  if ('minHeight' in node && node.minHeight !== null && node.minHeight !== 0) props.minH = Math.round(node.minHeight);
+  if ('maxHeight' in node && node.maxHeight !== null && node.maxHeight !== Infinity) props.maxH = Math.round(node.maxHeight);
+
+  // 2. Position & Absolute
+  if ('layoutPositioning' in node && node.layoutPositioning === 'ABSOLUTE') {
+    props.position = 'absolute';
+    props.x = Math.round(node.x);
+    props.y = Math.round(node.y);
+  } else if (!hasALParent) {
+    props.x = Math.round(node.x);
+    props.y = Math.round(node.y);
+  }
+
+  // 3. Layout (Self)
+  if ('layoutMode' in node && node.layoutMode !== 'NONE') {
+    props.flex = node.layoutMode === 'HORIZONTAL' ? 'row' : 'col';
+    props.gap = (await resolveVariable(node, 'itemSpacing')) || node.itemSpacing;
+    if ('layoutWrap' in node && node.layoutWrap === 'WRAP') props.wrap = true;
+    
+    const alignMap = { 'MIN': 'start', 'CENTER': 'center', 'MAX': 'end', 'SPACE_BETWEEN': 'between' };
+    if (node.primaryAxisAlignItems !== 'MIN') props.justify = alignMap[node.primaryAxisAlignItems] || 'start';
+    if (node.counterAxisAlignItems !== 'MIN') props.items = alignMap[node.counterAxisAlignItems] || 'start';
+
+    const pt = (await resolveVariable(node, 'paddingTop')) || node.paddingTop;
+    const pr = (await resolveVariable(node, 'paddingRight')) || node.paddingRight;
+    const pb = (await resolveVariable(node, 'paddingBottom')) || node.paddingBottom;
+    const pl = (await resolveVariable(node, 'paddingLeft')) || node.paddingLeft;
+
+    if (pt === pr && pt === pb && pt === pl) {
+      if (pt !== 0) props.p = pt;
+    } else {
+      if (pt === pb && pt !== 0) props.py = pt;
+      else { if (pt !== 0) props.pt = pt; if (pb !== 0) props.pb = pb; }
+      if (pl === pr && pl !== 0) props.px = pl;
+      else { if (pl !== 0) props.pl = pl; if (pr !== 0) props.pr = pr; }
+    }
+  }
+
+  // 4. Appearance
   if ('cornerRadius' in node && node.cornerRadius !== 0) {
     props.rounded = (await resolveVariable(node, 'cornerRadius')) || (node.cornerRadius === figma.mixed ? 'mixed' : node.cornerRadius);
   }
 
-  // Fills
   if ('fills' in node && Array.isArray(node.fills) && node.fills.length > 0) {
     const varName = await resolveVariable(node, 'fills');
-    if (varName) {
-      props.fill = varName;
-    } else {
-      const fill = node.fills[0];
-      if (fill.type === 'SOLID') {
-        props.fill = serializeColor(fill.color, fill.opacity);
-      }
-    }
+    if (varName) props.fill = varName;
+    else if (node.fills[0].type === 'SOLID') props.fill = serializeColor(node.fills[0].color, node.fills[0].opacity);
   }
 
-  // Strokes
   if ('strokes' in node && Array.isArray(node.strokes) && node.strokes.length > 0) {
     const varName = await resolveVariable(node, 'strokes');
-    if (varName) {
-      props.stroke = varName;
-    } else {
-      const stroke = node.strokes[0];
-      if (stroke.type === 'SOLID') {
-        props.stroke = serializeColor(stroke.color, stroke.opacity);
-      }
-    }
+    if (varName) props.stroke = varName;
+    else if (node.strokes[0].type === 'SOLID') props.stroke = serializeColor(node.strokes[0].color, node.strokes[0].opacity);
     props.strokeWidth = node.strokeWeight;
   }
 
-  // Effects
   if ('effects' in node && Array.isArray(node.effects) && node.effects.length > 0) {
     for (const effect of node.effects) {
-      if (effect.type === 'DROP_SHADOW') {
-        props.shadow = `${effect.offset.x} ${effect.offset.y} ${effect.radius} ${serializeColor(effect.color, effect.color.a)}`;
-      } else if (effect.type === 'INNER_SHADOW') {
-        props.innerShadow = `${effect.offset.x} ${effect.offset.y} ${effect.radius} ${serializeColor(effect.color, effect.color.a)}`;
-      } else if (effect.type === 'LAYER_BLUR') {
-        props.blur = effect.radius;
-      } else if (effect.type === 'BACKGROUND_BLUR') {
-        props.backdropBlur = effect.radius;
-      }
+      if (effect.type === 'DROP_SHADOW') props.shadow = `${effect.offset.x} ${effect.offset.y} ${effect.radius} ${serializeColor(effect.color, effect.color.a)}`;
+      else if (effect.type === 'INNER_SHADOW') props.innerShadow = `${effect.offset.x} ${effect.offset.y} ${effect.radius} ${serializeColor(effect.color, effect.color.a)}`;
+      else if (effect.type === 'LAYER_BLUR') props.blur = effect.radius;
+      else if (effect.type === 'BACKGROUND_BLUR') props.backdropBlur = effect.radius;
     }
-  }
-
-  // Layout
-  if ('layoutMode' in node && node.layoutMode !== 'NONE') {
-    props.flex = node.layoutMode === 'HORIZONTAL' ? 'row' : 'col';
-    props.gap = (await resolveVariable(node, 'itemSpacing')) || node.itemSpacing;
-    
-    const ptV = await resolveVariable(node, 'paddingTop');
-    const prV = await resolveVariable(node, 'paddingRight');
-    const pbV = await resolveVariable(node, 'paddingBottom');
-    const plV = await resolveVariable(node, 'paddingLeft');
-
-    if (ptV && ptV === prV && ptV === pbV && ptV === plV) {
-      props.padding = ptV;
-    } else {
-      if (ptV && ptV === pbV) props.py = ptV;
-      else { props.pt = ptV || node.paddingTop; props.pb = pbV || node.paddingBottom; }
-      
-      if (plV && plV === prV) props.px = plV;
-      else { props.pl = plV || node.paddingLeft; props.pr = prV || node.paddingRight; }
-    }
-    
-    // Cleanup defaults
-    if (props.pt === 0) delete props.pt;
-    if (props.pr === 0) delete props.pr;
-    if (props.pb === 0) delete props.pb;
-    if (props.pl === 0) delete props.pl;
-    if (props.px === 0) delete props.px;
-    if (props.py === 0) delete props.py;
-    if (props.padding === 0) delete props.padding;
   }
 
   if (node.type === 'TEXT') {
     props.characters = node.characters;
     props.size = node.fontSize;
+    const hAlignMap = { 'LEFT': 'left', 'CENTER': 'center', 'RIGHT': 'right', 'JUSTIFIED': 'justify' };
+    if (node.textAlignHorizontal !== 'LEFT') props.align = hAlignMap[node.textAlignHorizontal];
+    const vAlignMap = { 'TOP': 'top', 'CENTER': 'center', 'BOTTOM': 'bottom' };
+    if (node.textAlignVertical !== 'TOP') props.alignV = vAlignMap[node.textAlignVertical];
   }
 
   const children = [];
@@ -755,6 +766,11 @@ function serializeColor(color, opacity) {
   const r = Math.round(color.r * 255);
   const g = Math.round(color.g * 255);
   const b = Math.round(color.b * 255);
+  
+  // Snap to pure white/black
+  if (r > 250 && g > 250 && b > 250) return '#ffffff';
+  if (r < 5 && g < 5 && b < 5) return '#000000';
+
   if (opacity !== undefined && opacity < 1) {
     return `rgba(${r},${g},${b},${parseFloat(opacity.toFixed(2))})`;
   }
