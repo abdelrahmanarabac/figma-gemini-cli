@@ -209,6 +209,23 @@ class TokensImportCommand extends Command {
   }
 }
 
+class TokensCreateCommand extends Command {
+  name = 'tokens create [preset]';
+  description = 'Interactive or preset-based token creation';
+
+  async execute(ctx, opts, preset) {
+    if (!preset) {
+      console.log(chalk.cyan('\n  Please specify a preset to create:\n'));
+      console.log(chalk.white('    • tailwind  (Full color palette)'));
+      console.log(chalk.white('    • shadcn    (UI primitives)'));
+      console.log(chalk.white('    • spacing   (4px base scale)'));
+      console.log(chalk.white('    • radii     (Border corner scale)'));
+      console.log(chalk.gray('\n  Example: figma-gemini-cli tokens create tailwind\n'));
+      return;
+    }
+  }
+}
+
 export default [
   new TokensClearCommand(),
   new TokensTailwindCommand(),
@@ -217,4 +234,5 @@ export default [
   new TokensSpacingCommand(),
   new TokensRadiiCommand(),
   new TokensImportCommand(),
+  new TokensCreateCommand(),
 ];

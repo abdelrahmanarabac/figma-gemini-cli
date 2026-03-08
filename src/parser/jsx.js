@@ -25,6 +25,8 @@ const COMPONENT_MAP = {
 const PROP_MAP = {
     width: 'width', w: 'width',
     height: 'height', h: 'height',
+    layoutAlign: 'layoutAlign', 
+    layoutGrow: 'layoutGrow',
     minWidth: 'minWidth', minW: 'minWidth',
     maxWidth: 'maxWidth', maxW: 'maxWidth',
     minHeight: 'minHeight', minH: 'minHeight',
@@ -62,7 +64,7 @@ const NUMERIC_PROPS = new Set([
     'fontSize', 'fontWeight', 'opacity', 'x', 'y', 'rotation', 'strokeWidth'
 ]);
 
-function transformPropValue(key, value) {
+function transformPropValue(key, value, props) {
     if (key === 'layoutMode') {
         if (value === 'row') return 'HORIZONTAL';
         if (value === 'col') return 'VERTICAL';
@@ -72,6 +74,11 @@ function transformPropValue(key, value) {
     if (key === 'primaryAxisAlignItems' || key === 'counterAxisAlignItems') {
         const map = { start: 'MIN', center: 'CENTER', end: 'MAX', between: 'SPACE_BETWEEN' };
         return map[value] || value;
+    }
+    if (key === 'width' || key === 'height') {
+        if (value === 'fill') return 'fill';
+        if (value === 'hug') return 'hug';
+        return value;
     }
     if (key === 'fontWeight') {
         const map = { thin: 100, light: 300, regular: 400, normal: 400, medium: 500, semibold: 600, bold: 700, extrabold: 800, black: 900 };
@@ -102,7 +109,7 @@ function parseProps(propsStr) {
         }
         
         const mappedKey = PROP_MAP[key] || key;
-        props[mappedKey] = transformPropValue(mappedKey, value);
+        props[mappedKey] = transformPropValue(mappedKey, value, props);
     }
     return props;
 }

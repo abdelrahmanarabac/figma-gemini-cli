@@ -346,15 +346,13 @@ async function createNodeTransaction(type, props, parentId) {
     try {
       if (typeof props.width === 'number') {
         node.layoutSizingHorizontal = 'FIXED';
-        node.resize(props.width, node.height); // HARD LOCK: Re-enforce numeric width
+        node.resize(props.width, node.height);
       } else if (props.width === 'fill' && hasALParent) {
         node.layoutSizingHorizontal = 'FILL';
+      } else if (props.width === 'hug') {
+        node.layoutSizingHorizontal = 'HUG';
       } else if (isALFrame || node.type === 'TEXT') {
-        if (node.type === 'FRAME' && node.children.length === 0 && typeof props.width !== 'number') {
-           node.layoutSizingHorizontal = 'FIXED';
-        } else {
-           node.layoutSizingHorizontal = 'HUG';
-        }
+        node.layoutSizingHorizontal = 'HUG';
       }
     } catch (e) {
       console.warn('Failed to set horizontal sizing:', e.message);
@@ -364,9 +362,11 @@ async function createNodeTransaction(type, props, parentId) {
     try {
       if (typeof props.height === 'number') {
         node.layoutSizingVertical = 'FIXED';
-        node.resize(node.width, props.height); // HARD LOCK: Re-enforce numeric height
+        node.resize(node.width, props.height);
       } else if (props.height === 'fill' && hasALParent) {
         node.layoutSizingVertical = 'FILL';
+      } else if (props.height === 'hug') {
+        node.layoutSizingVertical = 'HUG';
       } else if (isALFrame || node.type === 'TEXT') {
         node.layoutSizingVertical = 'HUG';
       }

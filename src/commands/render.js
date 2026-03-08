@@ -58,25 +58,37 @@ class RenderCommand extends Command {
 }
 
 class RenderBatchCommand extends Command {
-  name = 'render-batch <jsxArray>';
+  name = 'render-batch [jsxArray]';
   description = 'Render multiple JSX frames sequentially';
 
   constructor() {
     super();
     this.options = [
+      { flags: '-f, --file <path>', description: 'Read batch from JSON file' },
       { flags: '-v, --verbose', description: 'Show detailed logs' }
     ];
   }
 
   async execute(ctx, options, jsxArray) {
-    if (!jsxArray) {
-      ctx.logError('Usage: render-batch \'["<Frame ...>", "<Frame ...>"]\'');
+    let rawInput = jsxArray;
+
+    if (options.file) {
+      try {
+        rawInput = readFileSync(options.file, 'utf8');
+      } catch (err) {
+        ctx.logError(`Failed to read file: ${err.message}`);
+        return;
+      }
+    }
+
+    if (!rawInput) {
+      ctx.logError('Usage: render-batch \'["<Frame ...>", "<Frame ...>"]\' or -f <file>');
       return;
     }
 
     let items;
     try {
-      items = JSON.parse(jsxArray);
+      items = JSON.parse(rawInput);
     } catch {
       ctx.logError('Invalid JSON array. Wrap JSX strings in a JSON array.');
       return;
