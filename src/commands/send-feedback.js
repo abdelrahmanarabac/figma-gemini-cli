@@ -48,20 +48,32 @@ class SendFeedbackCommand extends Command {
     // a small AWS Lambda/Vercel function, or an internal feedback API.
     
     try {
-      // For this implementation, we'll use a public-facing feedback proxy 
-      // or simply simulate a successful send to the maintainer's email.
-      // We'll use a fetch-based approach as it doesn't require extra dependencies like nodemailer.
-      
-      /*
-      const response = await fetch('https://formspree.io/f/mqazklow', { // Replace with actual endpoint
+      const response = await fetch('https://api.emailjs.com/api/v1.0/email/send', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(metadata)
+        headers: { 
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          service_id: 'service_0yt18wn',
+          template_id: 'template_06fdal4',
+          user_id: '1nypiHYZLO9mf7hd3',
+          accessToken: 'cyi95xLRMPz5mFiMmw55m',
+          template_params: {
+            message: metadata.message,
+            version: metadata.version,
+            platform: metadata.platform,
+            os_release: metadata.os_release,
+            arch: metadata.arch,
+            timestamp: metadata.timestamp,
+            maintainer_email: metadata.maintainer_email
+          }
+        })
       });
-      */
 
-      // Simulating success for this task as we don't have a live endpoint ready
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || `Server responded with ${response.status}`);
+      }
       
       console.log(chalk.green('\n  ✔ Feedback sent successfully!'));
       console.log(chalk.white(`    Thank you for helping improve Figma CLI. The maintainer will receive your message at: ${chalk.cyan(metadata.maintainer_email)}`));
