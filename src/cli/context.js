@@ -43,6 +43,9 @@ export class CommandContext {
       return;
     }
     console.log(chalk.green(`${this._getSymbol('success')} ${message}`));
+    if (jsonPayload) {
+      console.log(chalk.gray(JSON.stringify(jsonPayload, null, 2)));
+    }
   }
 
   logWarning(message) {
@@ -56,6 +59,9 @@ export class CommandContext {
       return;
     }
     console.log(chalk.red(`${this._getSymbol('error')} ${message}`));
+    if (jsonPayload) {
+      console.log(chalk.gray(JSON.stringify(jsonPayload, null, 2)));
+    }
   }
 
   // ── Figma Execution ──────────────────────────────────

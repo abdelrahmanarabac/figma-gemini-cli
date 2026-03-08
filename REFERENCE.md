@@ -110,17 +110,25 @@ node src/index.js render-batch '[
 
 Search, mutate, or organize existing document structures.
 
-### Selectors
+### Selectors & Inspection
 ```powershell
-# Retrieve properties of an explicitly targeted Node ID
+# View current selection and canvas details
+node src/index.js canvas info
+
+# Retrieve properties (defaults to selection if no ID provided)
+node src/index.js get
 node src/index.js get "1:234"
 
-# Query the tree using an XPath syntax simulation
-node src/index.js raw query "//FRAME"
-node src/index.js raw query "//GROUP[@name='content']"
-node src/index.js raw query "//*[contains(@name, 'Button')]"
+# Deep inspect and return JSX (defaults to selection)
+node src/index.js inspect
+node src/index.js inspect "1:234"
+```
 
-node src/index.js raw select "1:234,1:235"
+### Mutation Operations
+```powershell
+# Update an existing node (defaults to selection)
+node src/index.js update "<Frame bg=\"#000\" />"
+node src/index.js update "1:234" "<Frame bg=\"#000\" />"
 ```
 
 ### Geometric Modifications

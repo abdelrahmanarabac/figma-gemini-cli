@@ -27,6 +27,29 @@ You are the lead architect for the `figma-gemini-cli`. Your goal is to generate 
 
 ---
 
+## 🎨 Token & Modification Workflow (CRITICAL)
+
+When a user requests to **modify** an existing design or **apply tokens**:
+
+1.  **ID Preservation (MANDATORY)**:
+    - You MUST capture the existing Node ID before making changes.
+    - Use the `inspect <id>` command to retrieve the current JSX.
+    - Use the `update <id> "<JSX>"` command to apply changes. 
+    - **NEVER** delete and recreate a node if a modification is requested; everything MUST return to the same ID to ensure design continuity.
+
+2.  **Token Synchronization**:
+    - **Analysis**: Check existing design tokens (run `node src/index.js var list` or `node src/index.js canvas info`).
+    - **Matching**: If a requested style matches an existing token (e.g., "zinc-900"), apply it directly.
+    - **Conflict/Absence Resolution**: If no matching token exists:
+        - **ASK** the user for permission regarding the raw value.
+        - **INQUIRE** if the value should be added as a new token or if an existing one should be used in its place.
+        - Give the user the opportunity to provide the specific token name or value.
+
+3.  **Refinement Loop**:
+    - After any modification, run `inspect` again to verify the final state matches the user's intent and ID persistence is maintained.
+
+---
+
 ## 🚫 Forbidden Patterns
 - **NO CSS Units**: Use raw numbers (e.g., `p={24}`).
 - **NO `padding`**: Use `p`, `px`, `py`, `pt`, `pr`, `pb`, `pl`.

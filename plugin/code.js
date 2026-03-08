@@ -167,6 +167,26 @@ const handlers = {
     }
   },
 
+  'node.inspect': async (params) => {
+    let node;
+    if (params && params.id) {
+      node = await figma.getNodeByIdAsync(params.id);
+    } else {
+      node = figma.currentPage.selection[0];
+    }
+    
+    if (!node) throw new Error('Node not found or nothing selected');
+    return serializeNode(node);
+  },
+
+  'node.update': async (params) => {
+    const node = await figma.getNodeByIdAsync(params.id);
+    if (!node) throw new Error('Node not found');
+    // Apply props to the existing node using the same transaction logic
+    await applyPropsToNode(node, params.props || {});
+    return { nodeId: node.id, status: 'updated' };
+  },
+
   'node.create': async (params) => {
     const node = await createNodeTransaction(params.type, params.props || {}, params.parentId);
     return { nodeId: node.id, name: node.name };
@@ -508,6 +528,15 @@ async function createNodeTransaction(type, props, parentId) {
 
 // ── Utils ────────────────────────────────────────────
 
+async function findVariableByName(name) {
+  if (!name || typeof name !== 'string') return null;
+  const vars = await figma.variables.getLocalVariablesAsync();
+  // Match by name (e.g. "slate/500") or full path, case-insensitive and whitespace-agnostic
+  const clean = (s) => s.toLowerCase().replace(/\s+/g, '');
+  const searchName = clean(name);
+  return vars.find(v => clean(v.name) === searchName);
+}
+
 function parseColor(str) {
   if (!str || typeof str !== 'string') return null;
   
@@ -589,6 +618,281 @@ function parseInnerShadow(str) {
     visible: true,
     blendMode: 'NORMAL'
   };
+}
+
+async function serializeNode(node) {
+  const props = {
+    name: node.name,
+    w: Math.round(node.width),
+    h: Math.round(node.height),
+    x: Math.round(node.x),
+    y: Math.round(node.y),
+    opacity: node.opacity !== 1 ? parseFloat(node.opacity.toFixed(2)) : undefined,
+  };
+
+  if ('cornerRadius' in node && node.cornerRadius !== 0) {
+    props.rounded = (await resolveVariable(node, 'cornerRadius')) || (node.cornerRadius === figma.mixed ? 'mixed' : node.cornerRadius);
+  }
+
+  // Fills
+  if ('fills' in node && Array.isArray(node.fills) && node.fills.length > 0) {
+    const varName = await resolveVariable(node, 'fills');
+    if (varName) {
+      props.fill = varName;
+    } else {
+      const fill = node.fills[0];
+      if (fill.type === 'SOLID') {
+        props.fill = serializeColor(fill.color, fill.opacity);
+      }
+    }
+  }
+
+  // Strokes
+  if ('strokes' in node && Array.isArray(node.strokes) && node.strokes.length > 0) {
+    const varName = await resolveVariable(node, 'strokes');
+    if (varName) {
+      props.stroke = varName;
+    } else {
+      const stroke = node.strokes[0];
+      if (stroke.type === 'SOLID') {
+        props.stroke = serializeColor(stroke.color, stroke.opacity);
+      }
+    }
+    props.strokeWidth = node.strokeWeight;
+  }
+
+  // Effects
+  if ('effects' in node && Array.isArray(node.effects) && node.effects.length > 0) {
+    for (const effect of node.effects) {
+      if (effect.type === 'DROP_SHADOW') {
+        props.shadow = `${effect.offset.x} ${effect.offset.y} ${effect.radius} ${serializeColor(effect.color, effect.color.a)}`;
+      } else if (effect.type === 'INNER_SHADOW') {
+        props.innerShadow = `${effect.offset.x} ${effect.offset.y} ${effect.radius} ${serializeColor(effect.color, effect.color.a)}`;
+      } else if (effect.type === 'LAYER_BLUR') {
+        props.blur = effect.radius;
+      } else if (effect.type === 'BACKGROUND_BLUR') {
+        props.backdropBlur = effect.radius;
+      }
+    }
+  }
+
+  // Layout
+  if ('layoutMode' in node && node.layoutMode !== 'NONE') {
+    props.flex = node.layoutMode === 'HORIZONTAL' ? 'row' : 'col';
+    props.gap = (await resolveVariable(node, 'itemSpacing')) || node.itemSpacing;
+    
+    const ptV = await resolveVariable(node, 'paddingTop');
+    const prV = await resolveVariable(node, 'paddingRight');
+    const pbV = await resolveVariable(node, 'paddingBottom');
+    const plV = await resolveVariable(node, 'paddingLeft');
+
+    if (ptV && ptV === prV && ptV === pbV && ptV === plV) {
+      props.padding = ptV;
+    } else {
+      if (ptV && ptV === pbV) props.py = ptV;
+      else { props.pt = ptV || node.paddingTop; props.pb = pbV || node.paddingBottom; }
+      
+      if (plV && plV === prV) props.px = plV;
+      else { props.pl = plV || node.paddingLeft; props.pr = prV || node.paddingRight; }
+    }
+    
+    // Cleanup defaults
+    if (props.pt === 0) delete props.pt;
+    if (props.pr === 0) delete props.pr;
+    if (props.pb === 0) delete props.pb;
+    if (props.pl === 0) delete props.pl;
+    if (props.px === 0) delete props.px;
+    if (props.py === 0) delete props.py;
+    if (props.padding === 0) delete props.padding;
+  }
+
+  if (node.type === 'TEXT') {
+    props.characters = node.characters;
+    props.size = node.fontSize;
+  }
+
+  const children = [];
+  if ('children' in node) {
+    for (const child of node.children) {
+      children.push(await serializeNode(child));
+    }
+  }
+
+  return {
+    type: node.type,
+    props,
+    children
+  };
+}
+
+async function resolveVariable(node, prop) {
+  if (!node.boundVariables) return null;
+  
+  let bound = node.boundVariables[prop];
+  
+  // Property expansion mapping
+  if (!bound) {
+    if (prop === 'cornerRadius') bound = node.boundVariables['topLeftRadius'];
+    if (prop === 'paddingTop') bound = node.boundVariables['paddingTop']; // already tried
+    if (prop === 'fills' && node.fills && node.fills[0] && node.fills[0].boundVariables && node.fills[0].boundVariables.color) {
+        const v = await figma.variables.getVariableByIdAsync(node.fills[0].boundVariables.color.id);
+        return v ? v.name : null;
+    }
+    if (prop === 'strokes' && node.strokes && node.strokes[0] && node.strokes[0].boundVariables && node.strokes[0].boundVariables.color) {
+        const v = await figma.variables.getVariableByIdAsync(node.strokes[0].boundVariables.color.id);
+        return v ? v.name : null;
+    }
+  }
+
+  if (!bound) return null;
+  const id = Array.isArray(bound) ? bound[0].id : bound.id;
+  if (!id) return null;
+  const v = await figma.variables.getVariableByIdAsync(id);
+  return v ? v.name : null;
+}
+
+function serializeColor(color, opacity) {
+  const r = Math.round(color.r * 255);
+  const g = Math.round(color.g * 255);
+  const b = Math.round(color.b * 255);
+  if (opacity !== undefined && opacity < 1) {
+    return `rgba(${r},${g},${b},${parseFloat(opacity.toFixed(2))})`;
+  }
+  return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+}
+
+async function applyPropsToNode(node, props) {
+  if (props.name) node.name = props.name;
+
+  if (node.type === 'TEXT') {
+    const weight = String(props.fontWeight || '400').toLowerCase();
+    const styleMap = {
+      '100': 'Thin', '200': 'Extra Light', '300': 'Light', '400': 'Regular',
+      '500': 'Medium', '600': 'Semi Bold', '700': 'Bold', '800': 'Extra Bold', '900': 'Black',
+      'thin': 'Thin', 'light': 'Light', 'regular': 'Regular', 'medium': 'Medium', 'bold': 'Bold', 'semibold': 'Semi Bold'
+    };
+    const style = styleMap[weight] || 'Regular';
+    await figma.loadFontAsync({ family: 'Inter', style });
+    node.fontName = { family: 'Inter', style };
+    if (props.fontSize !== undefined) node.fontSize = props.fontSize;
+    if (props.characters !== undefined) node.characters = props.characters;
+  }
+
+  // Styling (Solid colors and Variable Bindings)
+  if (props.fill) {
+    const v = await findVariableByName(props.fill);
+    if (v) {
+      node.fills = [{
+        type: 'SOLID',
+        color: { r: 0, g: 0, b: 0 },
+        boundVariables: { color: { type: 'VARIABLE_ALIAS', id: v.id } }
+      }];
+    } else {
+      const c = parseColor(props.fill);
+      if (c) {
+        if ('a' in c) {
+          node.fills = [{ type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a }];
+        } else {
+          node.fills = [{ type: 'SOLID', color: c }];
+        }
+      }
+    }
+  }
+
+  if (props.stroke) {
+    const v = await findVariableByName(props.stroke);
+    if (v) {
+      node.strokes = [{
+        type: 'SOLID',
+        color: { r: 0, g: 0, b: 0 },
+        boundVariables: { color: { type: 'VARIABLE_ALIAS', id: v.id } }
+      }];
+    } else {
+      const c = parseColor(props.stroke);
+      if (c) {
+        if ('a' in c) {
+          node.strokes = [{ type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a }];
+        } else {
+          node.strokes = [{ type: 'SOLID', color: c }];
+        }
+      }
+    }
+  }
+  if (props.strokeWidth !== undefined) node.strokeWeight = props.strokeWidth;
+
+  const effects = [];
+  if (props.shadow) {
+    const s = parseShadow(props.shadow);
+    if (s) effects.push(s);
+  }
+  if (props.innerShadow) {
+    const s = parseInnerShadow(props.innerShadow);
+    if (s) effects.push(s);
+  }
+  if (props.blur !== undefined) {
+    effects.push({ type: 'LAYER_BLUR', radius: props.blur, visible: true });
+  }
+  if (props.backdropBlur !== undefined) {
+    effects.push({ type: 'BACKGROUND_BLUR', radius: props.backdropBlur, visible: true });
+  }
+  if (effects.length > 0) node.effects = effects;
+
+  if (props.cornerRadius !== undefined) {
+    const v = await findVariableByName(String(props.cornerRadius));
+    if (v) {
+      try { node.setBoundVariable('cornerRadius', v); } catch(e) { console.warn('Radius bind failed:', e.message); }
+    } else if (typeof props.cornerRadius === 'number') {
+      node.cornerRadius = props.cornerRadius;
+    }
+  }
+  
+  if (props.opacity !== undefined) node.opacity = props.opacity;
+
+  // Layout
+  if (props.layoutMode && 'layoutMode' in node) node.layoutMode = props.layoutMode;
+  if (props.itemSpacing !== undefined && 'itemSpacing' in node) {
+     const v = await findVariableByName(String(props.itemSpacing));
+     if (v) {
+        try { node.setBoundVariable('itemSpacing', v); } catch(e) { console.warn('Spacing bind failed:', e.message); }
+     } else if (typeof props.itemSpacing === 'number') {
+        node.itemSpacing = props.itemSpacing;
+     }
+  }
+  
+  // Padding
+  if (props.padding !== undefined && 'paddingTop' in node) {
+    const v = await findVariableByName(String(props.padding));
+    if (v) {
+       try {
+         node.setBoundVariable('paddingTop', v);
+         node.setBoundVariable('paddingRight', v);
+         node.setBoundVariable('paddingBottom', v);
+         node.setBoundVariable('paddingLeft', v);
+       } catch(e) { console.warn('Padding bind failed:', e.message); }
+    } else if (typeof props.padding === 'number') {
+       node.paddingTop = node.paddingRight = node.paddingBottom = node.paddingLeft = props.padding;
+    }
+  }
+
+  const pMap = { 
+    paddingLeft: props.paddingLeft || props.paddingHorizontal || props.padding, 
+    paddingRight: props.paddingRight || props.paddingHorizontal || props.padding, 
+    paddingTop: props.paddingTop || props.paddingVertical || props.padding, 
+    paddingBottom: props.paddingBottom || props.paddingVertical || props.padding 
+  };
+  for (const [key, val] of Object.entries(pMap)) {
+    if (val !== undefined && key in node) {
+      const v = await findVariableByName(String(val));
+      if (v) {
+        try { node.setBoundVariable(key, v); } catch(e) { console.warn(`${key} bind failed:`, e.message); }
+      } else if (typeof val === 'number') {
+        node[key] = val;
+      }
+    }
+  }
+
+  if (props.width !== undefined && typeof props.width === 'number') node.resize(props.width, node.height);
+  if (props.height !== undefined && typeof props.height === 'number') node.resize(node.width, props.height);
 }
 
 figma.ui.onmessage = async (msg) => {

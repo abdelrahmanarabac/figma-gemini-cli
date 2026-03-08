@@ -163,14 +163,20 @@ class FindCommand extends Command {
 }
 
 class GetCommand extends Command {
-  name = 'get <id>';
-  description = 'Get node properties';
+  name = 'get [id]';
+  description = 'Get node properties (defaults to selection)';
   needsConnection = true;
 
   async execute(ctx, options, id) {
     try {
       const code = `
-        const n = await figma.getNodeByIdAsync("${id}");
+        let n;
+        if ("${id || ''}" && "${id || ''}" !== "undefined") {
+          n = await figma.getNodeByIdAsync("${id}");
+        } else {
+          n = figma.currentPage.selection[0];
+        }
+        
         if (!n) return null;
         return { 
           id: n.id, 
@@ -184,7 +190,7 @@ class GetCommand extends Command {
       if (result) {
         ctx.logSuccess('Node info:', result);
       } else {
-        ctx.logError(`Node ${id} not found.`);
+        ctx.logError(id ? `Node ${id} not found.` : 'No node selected.');
       }
     } catch (err) {
       ctx.logError(`Get error: ${err.message}`);
@@ -192,14 +198,110 @@ class GetCommand extends Command {
   }
 }
 
+class InspectCommand extends Command {
+  name = 'inspect [id]';
+  description = 'Deep inspect a node and return JSX (defaults to selection)';
+  needsConnection = true;
+
+  async execute(ctx, options, id) {
+    try {
+      const { sendCommand } = await import('../transport/bridge.js');
+      const result = await sendCommand('node.inspect', { id });
+      
+      if (result && result.data) {
+        function toJSX(node, indent = '') {
+          const typeMap = { FRAME: 'Frame', RECTANGLE: 'Rectangle', ELLIPSE: 'Ellipse', TEXT: 'Text', LINE: 'Line' };
+          const tag = typeMap[node.type] || 'Frame';
+          let props = Object.entries(node.props)
+            .filter(([_, v]) => v !== undefined)
+            .map(([k, v]) => {
+              if (typeof v === 'string') return `${k}="${v}"`;
+              return `${k}={${JSON.stringify(v)}}`;
+            })
+            .join(' ');
+          
+          if (node.children && node.children.length > 0) {
+            const childJSX = node.children.map(c => toJSX(c, indent + '  ')).join('\n');
+            return `${indent}<${tag} ${props}>\n${childJSX}\n${indent}</${tag}>`;
+          }
+          return `${indent}<${tag} ${props} />`;
+        }
+
+        ctx.logSuccess(`JSX Representation (${result.data.props.name}):`);
+        console.log('\n' + toJSX(result.data));
+      } else {
+        ctx.logError(id ? `Node ${id} not found.` : 'No node selected.');
+      }
+    } catch (err) {
+      ctx.logError(`Inspect error: ${err.message}`);
+    }
+  }
+}
+
+class UpdateCommand extends Command {
+  name = 'update [id] [jsx]';
+  description = 'Update an existing node by ID using JSX props (defaults to selection)';
+  needsConnection = true;
+
+  async execute(ctx, options, id, jsx) {
+    let targetId = id;
+    let inputJsx = jsx;
+
+    // Handle shift if only one arg provided
+    if (id && !jsx && id.includes('<')) {
+       inputJsx = id;
+       targetId = 'selected';
+    }
+
+    if (!targetId || targetId === 'selected') {
+       const selCode = `return figma.currentPage.selection[0]?.id`;
+       targetId = await ctx.eval(selCode);
+    }
+
+    if (!targetId || !inputJsx) {
+      ctx.logError('Usage: update [id] "<Frame prop={val} />"');
+      return;
+    }
+
+    try {
+      const { parseJSX } = await import('../parser/jsx.js');
+      const { commands } = parseJSX(inputJsx);
+      
+      if (commands.length === 0) {
+         ctx.logError('Invalid JSX.');
+         return;
+      }
+
+      // We only take props from the root of the provided JSX
+      const props = commands[0].params.props;
+      const { sendCommand } = await import('../transport/bridge.js');
+      const result = await sendCommand('node.update', { id: targetId, props });
+      
+      if (result && result.data && result.data.status === 'updated') {
+         ctx.logSuccess(`Node ${targetId} updated successfully`);
+      } else {
+         ctx.logError(`Update failed for node ${targetId}`);
+      }
+    } catch (err) {
+      ctx.logError(`Update error: ${err.message}`);
+    }
+  }
+}
+
 class NodeCommand extends Command {
   name = 'node <action> [ids...]';
-  description = 'Node operations: to-component, delete';
+  description = 'Node operations: to-component, delete (defaults to selection)';
   needsConnection = true;
 
   async execute(ctx, options, action, ...ids) {
-    if (!ids || ids.length === 0) {
-      ctx.logError('Usage: node <action> <id1> [id2...]');
+    let targetIds = ids;
+    if (!targetIds || targetIds.length === 0) {
+      const selCode = `return figma.currentPage.selection.map(n => n.id)`;
+      targetIds = await ctx.eval(selCode);
+    }
+
+    if (!targetIds || targetIds.length === 0) {
+      ctx.logError('Usage: node <action> [id1] [id2...] (or select nodes in Figma)');
       return;
     }
 
@@ -207,7 +309,7 @@ class NodeCommand extends Command {
       let code = '';
       if (action === 'to-component') {
         code = `
-          const ids = "${ids.join(',')}".split(',');
+          const ids = "${targetIds.join(',')}".split(',');
           const results = [];
           for (const id of ids) {
             const n = await figma.getNodeByIdAsync(id);
@@ -227,7 +329,7 @@ class NodeCommand extends Command {
         `;
       } else if (action === 'delete') {
         code = `
-          const ids = "${ids.join(',')}".split(',');
+          const ids = "${targetIds.join(',')}".split(',');
           const results = [];
           for (const id of ids) {
             const n = await figma.getNodeByIdAsync(id);
@@ -255,5 +357,7 @@ export default [
   new EvalCommand(), 
   new FindCommand(), 
   new GetCommand(), 
+  new InspectCommand(),
+  new UpdateCommand(),
   new NodeCommand()
 ];
