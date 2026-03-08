@@ -144,6 +144,12 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ---
 
+## 🎖 Acknowledgments
+
+Special thanks to **[silships](https://github.com/silships)** for the inspiration, support, and contributions that helped shape key parts of this project.
+
+---
+
 ## 📄 License
 
 Distributed under the MIT License. See `LICENSE` for more information.
