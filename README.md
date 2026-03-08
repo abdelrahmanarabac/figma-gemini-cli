@@ -8,6 +8,21 @@ A professional Node.js-based command-line interface that provides direct, progra
 
 ---
 
+## ⚠️ Experimental Status
+
+This CLI is currently **experimental and under active development**.
+Features, commands, and APIs may change frequently as the project evolves.
+
+Use it for testing, experimentation, and development workflows, but expect breaking changes between versions.
+
+### 💡 Feedback & Support
+
+We highly encourage users to report bugs or provide feedback to help us improve. You can:
+- Use the built-in command: `node src/index.js send-feedback "Your message"`
+- Open an issue on [GitHub Issues](https://github.com/abdelrahmanarabac/figma-gemini-cli/issues)
+
+---
+
 ## 🛠 Prerequisites
 
 Before using this tool, ensure you have the following installed:
