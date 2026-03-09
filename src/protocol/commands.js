@@ -7,7 +7,7 @@ import { randomUUID } from 'crypto';
 // Valid Figma node types
 const NODE_TYPES = new Set([
     'FRAME', 'GROUP', 'RECTANGLE', 'ELLIPSE', 'TEXT',
-    'COMPONENT', 'INSTANCE', 'LINE', 'VECTOR', 'BOOLEAN_OPERATION'
+    'COMPONENT', 'INSTANCE', 'LINE', 'VECTOR', 'BOOLEAN_OPERATION', 'SVG'
 ]);
 
 // Command registry: Only include commands handled by the plugin

@@ -320,203 +320,30 @@ async function createNodeTransaction(type, props, parentId) {
     case 'ELLIPSE': node = figma.createEllipse(); break;
     case 'TEXT': node = figma.createText(); break;
     case 'LINE': node = figma.createLine(); break;
+    case 'SVG': 
+      if (props.content) {
+        try {
+          node = figma.createNodeFromSvg(props.content);
+          if (props.width && props.height) node.resize(props.width, props.height);
+        } catch (e) {
+          throw new Error(`SVG Creation failed: ${e.message}`);
+        }
+      } else {
+        node = figma.createFrame();
+      }
+      break;
     default: node = figma.createFrame();
   }
 
-  // 2. Immediate properties (Independent of parent)
-  if (props.name) node.name = props.name;
-  
-  if (node.type === 'TEXT') {
-    try {
-      const weight = String(props.fontWeight || '400').toLowerCase();
-      const styleMap = {
-        '100': 'Thin', '200': 'Extra Light', '300': 'Light', '400': 'Regular',
-        '500': 'Medium', '600': 'Semi Bold', '700': 'Bold', '800': 'Extra Bold', '900': 'Black',
-        'thin': 'Thin', 'light': 'Light', 'regular': 'Regular', 'medium': 'Medium', 'bold': 'Bold', 'semibold': 'Semi Bold'
-      };
-      const style = styleMap[weight] || 'Regular';
-      await figma.loadFontAsync({ family: 'Inter', style });
-      node.fontName = { family: 'Inter', style };
-      if (props.fontSize !== undefined) node.fontSize = props.fontSize;
-      if (props.characters !== undefined) node.characters = props.characters;
-    } catch (e) {
-      throw new Error(`TEXT setup failed: ${e.message}`);
-    }
-  }
-
-  // Appearance
-  try {
-    const fills = [];
-    if (props.fill) {
-      const c = parseColor(props.fill);
-      if (c) {
-        if ('a' in c) {
-          fills.push({ type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a });
-        } else {
-          fills.push({ type: 'SOLID', color: c });
-        }
-      }
-    }
-
-    if (fills.length > 0) {
-      node.fills = fills;
-    } else if (node.type === 'FRAME') {
-      node.fills = []; // Frames transparent by default
-    }
-  } catch (e) {
-    throw new Error(`Fills setup failed: ${e.message}`);
-  }
-
-  try {
-    if (props.stroke) {
-      const c = parseColor(props.stroke);
-      if (c) {
-        if ('a' in c) {
-          node.strokes = [{ type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a }];
-        } else {
-          node.strokes = [{ type: 'SOLID', color: c }];
-        }
-        node.strokeWeight = props.strokeWidth || 1;
-        if (props.strokeAlign && 'strokeAlign' in node) {
-          const alignMap = { inside: 'INSIDE', outside: 'OUTSIDE', center: 'CENTER' };
-          node.strokeAlign = alignMap[props.strokeAlign.toLowerCase()] || 'INSIDE';
-        }
-      }
-    }
-  } catch (e) {
-    throw new Error(`Stroke setup failed: ${e.message}`);
-  }
-
-  // Effects (Shadows/Blurs)
-  try {
-    const effects = [];
-    if (props.shadow) {
-      const s = parseShadow(props.shadow);
-      if (s) effects.push(s);
-    }
-    if (props.innerShadow) {
-      const s = parseInnerShadow(props.innerShadow);
-      if (s) effects.push(s);
-    }
-    if (props.blur !== undefined) {
-      effects.push({ type: 'LAYER_BLUR', radius: props.blur, visible: true });
-    }
-    if (props.backdropBlur !== undefined) {
-      effects.push({ type: 'BACKGROUND_BLUR', radius: props.backdropBlur, visible: true });
-    }
-
-    if (effects.length > 0) {
-      node.effects = effects;
-    }
-  } catch (e) {
-    console.warn('Effects setup failed:', e.message);
-  }
-
-  try {
-    if (props.cornerRadius !== undefined) node.cornerRadius = props.cornerRadius;
-    if (props.opacity !== undefined) node.opacity = props.opacity;
-  } catch (e) {
-    throw new Error(`Misc appearance failed: ${e.message}`);
-  }
-
-  // 3. Layout CONFIG (Self)
-  try {
-    if (props.layoutMode && 'layoutMode' in node) node.layoutMode = props.layoutMode;
-    if (props.itemSpacing !== undefined && 'itemSpacing' in node) node.itemSpacing = props.itemSpacing;
-    if (props.counterAxisSpacing !== undefined && 'counterAxisSpacing' in node) node.counterAxisSpacing = props.counterAxisSpacing;
-    if (props.layoutWrap && 'layoutWrap' in node) node.layoutWrap = props.layoutWrap;
-  } catch (e) {
-    throw new Error(`Layout config failed: ${e.message}`);
-  }
-  
-  // Padding
-  try {
-    if (props.padding !== undefined && 'paddingTop' in node) node.paddingTop = node.paddingRight = node.paddingBottom = node.paddingLeft = props.padding;
-    if (props.paddingHorizontal !== undefined && 'paddingLeft' in node) node.paddingLeft = node.paddingRight = props.paddingHorizontal;
-    if (props.paddingVertical !== undefined && 'paddingTop' in node) node.paddingTop = node.paddingBottom = props.paddingVertical;
-    if (props.paddingTop !== undefined && 'paddingTop' in node) node.paddingTop = props.paddingTop;
-    if (props.paddingRight !== undefined && 'paddingRight' in node) node.paddingRight = props.paddingRight;
-    if (props.paddingBottom !== undefined && 'paddingBottom' in node) node.paddingBottom = props.paddingBottom;
-    if (props.paddingLeft !== undefined && 'paddingLeft' in node) node.paddingLeft = props.paddingLeft;
-  } catch (e) {
-    throw new Error(`Padding failed: ${e.message}`);
-  }
-
-  try {
-    if (props.primaryAxisAlignItems && 'primaryAxisAlignItems' in node) node.primaryAxisAlignItems = props.primaryAxisAlignItems;
-    if (props.counterAxisAlignItems && 'counterAxisAlignItems' in node) node.counterAxisAlignItems = props.counterAxisAlignItems;
-  } catch (e) {
-    throw new Error(`Axis align failed: ${e.message}`);
-  }
-
-  // 4. SIZING (Before Append)
-  try {
-    // Only force a resize if numeric dimensions are provided.
-    // Otherwise, let Figma use its default (usually 100x100) or let Auto Layout handle it.
-    if (typeof props.width === 'number' || typeof props.height === 'number') {
-      const targetW = (typeof props.width === 'number') ? props.width : node.width;
-      const targetH = (typeof props.height === 'number') ? props.height : node.height;
-      
-      if (typeof node.resize === 'function') {
-        node.resize(targetW, targetH);
-      }
-    }
-  } catch (e) {
-    console.warn('Initial resize failed:', e.message);
-  }
-
-  // 5. APPEND
+  // 2. Append to parent (Required for some property applications like 'fill' sizing)
   if (parent && 'appendChild' in parent) {
     parent.appendChild(node);
   }
 
-  // 6. DYNAMIC SIZING (After Append)
-  const hasALParent = parent && 'layoutMode' in parent && parent.layoutMode !== 'NONE';
-  const isALFrame = 'layoutMode' in node && node.layoutMode !== 'NONE';
+  // 3. Apply properties
+  await applyPropsToNode(node, props);
 
-  if ('layoutSizingHorizontal' in node) {
-    try {
-      if (typeof props.width === 'number') {
-        node.layoutSizingHorizontal = 'FIXED';
-        node.resize(props.width, node.height);
-      } else if (props.width === 'fill' && hasALParent) {
-        node.layoutSizingHorizontal = 'FILL';
-      } else if (props.width === 'hug' || node.type === 'TEXT' || isALFrame) {
-        node.layoutSizingHorizontal = 'HUG';
-      } else {
-        node.layoutSizingHorizontal = 'FIXED';
-      }
-    } catch (e) {
-      console.warn('Failed to set horizontal sizing:', e.message);
-    }
-  }
-  if ('layoutSizingVertical' in node) {
-    try {
-      if (typeof props.height === 'number') {
-        node.layoutSizingVertical = 'FIXED';
-        node.resize(node.width, props.height);
-      } else if (props.height === 'fill' && hasALParent) {
-        node.layoutSizingVertical = 'FILL';
-      } else if (props.height === 'hug' || node.type === 'TEXT' || isALFrame) {
-        node.layoutSizingVertical = 'HUG';
-      } else {
-        node.layoutSizingVertical = 'FIXED';
-      }
-    } catch (e) {
-      console.warn('Failed to set vertical sizing:', e.message);
-    }
-  }
-
-  // Text Auto-resize
-  if (node.type === 'TEXT' && 'textAutoResize' in node) {
-    if (props.width === 'fill' || typeof props.width === 'number') {
-      node.textAutoResize = 'HEIGHT';
-    } else {
-      node.textAutoResize = 'WIDTH_AND_HEIGHT';
-    }
-  }
-
-  // 7. ROOT POSITIONING
+  // 4. Root Positioning (if no parent)
   if (!parentId) {
     const siblings = figma.currentPage.children;
     let maxX = -Infinity;
@@ -524,16 +351,6 @@ async function createNodeTransaction(type, props, parentId) {
     if (maxX !== -Infinity && node.x === 0) node.x = maxX + 200;
   }
   
-  if (props.position === 'absolute' && 'layoutPositioning' in node) {
-    const parentIsAL = parent && 'layoutMode' in parent && parent.layoutMode !== 'NONE';
-    if (parentIsAL) {
-      node.layoutPositioning = 'ABSOLUTE';
-    }
-  }
-  
-  if (props.x !== undefined) node.x = props.x;
-  if (props.y !== undefined) node.y = props.y;
-
   return node;
 }
 
@@ -664,7 +481,8 @@ async function serializeNode(node) {
   if ('maxHeight' in node && node.maxHeight !== null && node.maxHeight !== Infinity) props.maxH = Math.round(node.maxHeight);
 
   // 2. Position & Absolute
-  if ('layoutPositioning' in node && node.layoutPositioning === 'ABSOLUTE') {
+  const isAbsolute = 'layoutPositioning' in node && node.layoutPositioning === 'ABSOLUTE';
+  if (isAbsolute) {
     props.position = 'absolute';
     props.x = Math.round(node.x);
     props.y = Math.round(node.y);
@@ -700,7 +518,24 @@ async function serializeNode(node) {
 
   // 4. Appearance
   if ('cornerRadius' in node && node.cornerRadius !== 0) {
-    props.rounded = (await resolveVariable(node, 'cornerRadius')) || (node.cornerRadius === figma.mixed ? 'mixed' : node.cornerRadius);
+    const radiusVar = await resolveVariable(node, 'cornerRadius');
+    if (radiusVar) {
+      props.rounded = radiusVar;
+    } else if (node.cornerRadius !== figma.mixed) {
+      props.rounded = node.cornerRadius;
+    } else {
+      // Individual corners if mixed
+      const tl = (await resolveVariable(node, 'topLeftRadius')) || node.topLeftRadius;
+      const tr = (await resolveVariable(node, 'topRightRadius')) || node.topRightRadius;
+      const bl = (await resolveVariable(node, 'bottomLeftRadius')) || node.bottomLeftRadius;
+      const br = (await resolveVariable(node, 'bottomRightRadius')) || node.bottomRightRadius;
+
+      if (tl === tr && tl !== 0) props.roundedT = tl;
+      else { if (tl !== 0) props.roundedTL = tl; if (tr !== 0) props.roundedTR = tr; }
+      
+      if (bl === br && bl !== 0) props.roundedB = bl;
+      else { if (bl !== 0) props.roundedBL = bl; if (br !== 0) props.roundedBR = br; }
+    }
   }
 
   if ('fills' in node && Array.isArray(node.fills) && node.fills.length > 0) {
@@ -725,29 +560,72 @@ async function serializeNode(node) {
     }
   }
 
+  let finalType = node.type;
+
+  // ICON DETECTION & SVG EXPORT
+  const hasTextNodes = (n) => {
+    if (n.type === 'TEXT') return true;
+    if ('children' in n) return n.children.some(child => hasTextNodes(child));
+    return false;
+  };
+
+  const isIconLike = (
+    node.type === 'VECTOR' || 
+    node.type === 'BOOLEAN_OPERATION' || 
+    node.type === 'LINE' || 
+    node.type === 'ELLIPSE' || 
+    ((node.type === 'FRAME' || node.type === 'GROUP' || node.type === 'INSTANCE' || node.type === 'COMPONENT') && 
+     node.width <= 128 && node.height <= 128 && !hasTextNodes(node))
+  );
+
+  if (isIconLike) {
+    try {
+      const svg = await node.exportAsync({ format: 'SVG' });
+      props.content = String.fromCharCode(...svg);
+      finalType = 'SVG';
+    } catch (e) {
+      console.warn('Failed to export icon SVG:', e.message);
+    }
+  }
+
   if (node.type === 'TEXT') {
     props.text = node.characters;
-    props.size = node.fontSize;
+    props.size = node.fontSize === figma.mixed ? undefined : node.fontSize;
+    
+    // Use textAutoResize to determine sizing props
+    if (node.textAutoResize === 'WIDTH_AND_HEIGHT') {
+      props.w = 'hug';
+      props.h = 'hug';
+    } else if (node.textAutoResize === 'HEIGHT') {
+      props.h = 'hug';
+      // w is already set by the sizing logic above
+    }
     
     // Weight mapping
-    const style = node.fontName !== figma.mixed ? node.fontName.style.toLowerCase() : '';
-    if (style.includes('bold')) props.weight = 'bold';
+    const style = (node.fontName !== figma.mixed && node.fontName) ? node.fontName.style.toLowerCase() : '';
+    if (style.includes('black')) props.weight = 'black';
+    else if (style.includes('extrabold')) props.weight = 'extrabold';
+    else if (style.includes('semibold') || style.includes('semi bold')) props.weight = 'semibold';
+    else if (style.includes('bold')) props.weight = 'bold';
     else if (style.includes('medium')) props.weight = 'medium';
     else if (style.includes('light')) props.weight = 'light';
     else if (style.includes('thin')) props.weight = 'thin';
+    else props.weight = 'regular';
 
     // Text Case (Transform)
-    if (node.textCase === 'UPPER') props.transform = 'uppercase';
-    else if (node.textCase === 'LOWER') props.transform = 'lowercase';
-    else if (node.textCase === 'TITLE') props.transform = 'capitalize';
+    if (node.textCase !== figma.mixed) {
+      if (node.textCase === 'UPPER') props.transform = 'uppercase';
+      else if (node.textCase === 'LOWER') props.transform = 'lowercase';
+      else if (node.textCase === 'TITLE') props.transform = 'capitalize';
+    }
 
     // Letter Spacing (Tracking)
-    if (node.letterSpacing && node.letterSpacing.value !== 0) {
+    if (node.letterSpacing && node.letterSpacing !== figma.mixed && node.letterSpacing.value !== 0) {
        props.tracking = parseFloat(node.letterSpacing.value.toFixed(2));
     }
 
     // Line Height (Leading)
-    if (node.lineHeight && node.lineHeight.unit !== 'AUTO') {
+    if (node.lineHeight && node.lineHeight !== figma.mixed && node.lineHeight.unit !== 'AUTO') {
        if (node.lineHeight.unit === 'PIXELS') props.leading = parseFloat(node.lineHeight.value.toFixed(2));
        else if (node.lineHeight.unit === 'PERCENT') props.leading = parseFloat((node.lineHeight.value / 100).toFixed(2));
     }
@@ -759,19 +637,19 @@ async function serializeNode(node) {
   }
 
   const children = [];
-  if ('children' in node) {
+  if (finalType !== 'SVG' && 'children' in node) {
     for (const child of node.children) {
       children.push(await serializeNode(child));
     }
   }
 
   // 5. Stroke Details (Alignment)
-  if ('strokeAlign' in node && node.strokes.length > 0) {
+  if ('strokeAlign' in node && node.strokes && node.strokes.length > 0) {
     props.strokeAlign = node.strokeAlign.toLowerCase();
   }
 
   return {
-    type: node.type,
+    type: finalType,
     props,
     children
   };
@@ -826,6 +704,24 @@ function serializeColor(color, opacity) {
 async function applyPropsToNode(node, props) {
   if (props.name) node.name = props.name;
 
+  // Infer layoutMode if AL properties are present but flex is missing
+  if (!props.layoutMode && node.type === 'FRAME') {
+    const hasALProps = props.primaryAxisAlignItems !== undefined || 
+                       props.counterAxisAlignItems !== undefined || 
+                       props.itemSpacing !== undefined ||
+                       props.padding !== undefined ||
+                       props.paddingHorizontal !== undefined ||
+                       props.paddingVertical !== undefined ||
+                       props.paddingTop !== undefined ||
+                       props.paddingBottom !== undefined ||
+                       props.paddingLeft !== undefined ||
+                       props.paddingRight !== undefined;
+    if (hasALProps) {
+      // Default to VERTICAL (col) if multiple children or unspecified, as it is a safer default for cards/stacks
+      props.layoutMode = 'VERTICAL';
+    }
+  }
+
   if (node.type === 'TEXT') {
     const weight = String(props.fontWeight || '400').toLowerCase();
     const styleMap = {
@@ -836,22 +732,31 @@ async function applyPropsToNode(node, props) {
     const style = styleMap[weight] || 'Regular';
     await figma.loadFontAsync({ family: 'Inter', style });
     node.fontName = { family: 'Inter', style };
+    
     if (props.fontSize !== undefined) node.fontSize = props.fontSize;
     if (props.characters !== undefined) node.characters = props.characters;
 
-    // Advanced Typography
     if (props.textCase !== undefined) {
+      const val = String(props.textCase).toLowerCase();
       const caseMap = { uppercase: 'UPPER', lowercase: 'LOWER', capitalize: 'TITLE', none: 'ORIGINAL' };
-      node.textCase = caseMap[props.textCase] || 'ORIGINAL';
+      node.textCase = caseMap[val] || (typeof props.textCase === 'string' ? props.textCase.toUpperCase() : 'ORIGINAL');
     }
     if (props.letterSpacing !== undefined) {
       node.letterSpacing = { value: props.letterSpacing, unit: 'PIXELS' };
     }
     if (props.lineHeight !== undefined) {
-       // Interpret numbers as multipliers if < 5, else pixels
        if (props.lineHeight < 5) node.lineHeight = { value: props.lineHeight * 100, unit: 'PERCENT' };
        else node.lineHeight = { value: props.lineHeight, unit: 'PIXELS' };
     }
+    if (props.textAlignHorizontal) node.textAlignHorizontal = props.textAlignHorizontal;
+    if (props.textAlignVertical) node.textAlignVertical = props.textAlignVertical;
+  }
+
+  // Sizing (Independent of Layout)
+  if (typeof props.width === 'number' || typeof props.height === 'number') {
+    const targetW = (typeof props.width === 'number') ? props.width : node.width;
+    const targetH = (typeof props.height === 'number') ? props.height : node.height;
+    node.resize(targetW, targetH);
   }
 
   // Styling (Solid colors and Variable Bindings)
@@ -873,6 +778,8 @@ async function applyPropsToNode(node, props) {
         }
       }
     }
+  } else if (node.type === 'FRAME' && !('fills' in props)) {
+    node.fills = []; // Frames transparent by default if not specified
   }
 
   if (props.stroke) {
@@ -895,6 +802,10 @@ async function applyPropsToNode(node, props) {
     }
   }
   if (props.strokeWidth !== undefined) node.strokeWeight = props.strokeWidth;
+  if (props.strokeAlign && 'strokeAlign' in node) {
+    const alignMap = { inside: 'INSIDE', outside: 'OUTSIDE', center: 'CENTER' };
+    node.strokeAlign = alignMap[props.strokeAlign.toLowerCase()] || 'INSIDE';
+  }
 
   const effects = [];
   if (props.shadow) {
@@ -922,9 +833,21 @@ async function applyPropsToNode(node, props) {
     }
   }
   
+  // Individual corners
+  if (props.topLeftRadius !== undefined && 'topLeftRadius' in node) node.topLeftRadius = props.topLeftRadius;
+  if (props.topRightRadius !== undefined && 'topRightRadius' in node) node.topRightRadius = props.topRightRadius;
+  if (props.bottomLeftRadius !== undefined && 'bottomLeftRadius' in node) node.bottomLeftRadius = props.bottomLeftRadius;
+  if (props.bottomRightRadius !== undefined && 'bottomRightRadius' in node) node.bottomRightRadius = props.bottomRightRadius;
+
+  // Composite shorthand individual corners
+  if (props.topRadius !== undefined && 'topLeftRadius' in node) node.topLeftRadius = node.topRightRadius = props.topRadius;
+  if (props.bottomRadius !== undefined && 'bottomLeftRadius' in node) node.bottomLeftRadius = node.bottomRightRadius = props.bottomRadius;
+  if (props.leftRadius !== undefined && 'topLeftRadius' in node) node.topLeftRadius = node.bottomLeftRadius = props.leftRadius;
+  if (props.rightRadius !== undefined && 'topRightRadius' in node) node.topRightRadius = node.bottomRightRadius = props.rightRadius;
+  
   if (props.opacity !== undefined) node.opacity = props.opacity;
 
-  // Layout
+  // Layout Properties
   if (props.layoutMode && 'layoutMode' in node) node.layoutMode = props.layoutMode;
   if (props.itemSpacing !== undefined && 'itemSpacing' in node) {
      const v = await findVariableByName(String(props.itemSpacing));
@@ -934,22 +857,13 @@ async function applyPropsToNode(node, props) {
         node.itemSpacing = props.itemSpacing;
      }
   }
-  
-  // Padding
-  if (props.padding !== undefined && 'paddingTop' in node) {
-    const v = await findVariableByName(String(props.padding));
-    if (v) {
-       try {
-         node.setBoundVariable('paddingTop', v);
-         node.setBoundVariable('paddingRight', v);
-         node.setBoundVariable('paddingBottom', v);
-         node.setBoundVariable('paddingLeft', v);
-       } catch(e) { console.warn('Padding bind failed:', e.message); }
-    } else if (typeof props.padding === 'number') {
-       node.paddingTop = node.paddingRight = node.paddingBottom = node.paddingLeft = props.padding;
-    }
-  }
+  if (props.counterAxisSpacing !== undefined && 'counterAxisSpacing' in node) node.counterAxisSpacing = props.counterAxisSpacing;
+  if (props.layoutWrap && 'layoutWrap' in node) node.layoutWrap = props.layoutWrap;
 
+  if (props.primaryAxisAlignItems && 'primaryAxisAlignItems' in node) node.primaryAxisAlignItems = props.primaryAxisAlignItems;
+  if (props.counterAxisAlignItems && 'counterAxisAlignItems' in node) node.counterAxisAlignItems = props.counterAxisAlignItems;
+
+  // Padding
   const pMap = { 
     paddingLeft: props.paddingLeft || props.paddingHorizontal || props.padding, 
     paddingRight: props.paddingRight || props.paddingHorizontal || props.padding, 
@@ -967,27 +881,47 @@ async function applyPropsToNode(node, props) {
     }
   }
 
-  if (props.width !== undefined) {
+  // Advanced Layout Sizing (Fill/Hug)
+  const parent = node.parent;
+  const hasALParent = parent && 'layoutMode' in parent && parent.layoutMode !== 'NONE';
+  const isALFrame = 'layoutMode' in node && node.layoutMode !== 'NONE';
+
+  if ('layoutSizingHorizontal' in node) {
     if (typeof props.width === 'number') {
-      if ('layoutSizingHorizontal' in node) node.layoutSizingHorizontal = 'FIXED';
-      node.resize(props.width, node.height);
-    } else if (props.width === 'fill' && node.parent && 'layoutMode' in node.parent && node.parent.layoutMode !== 'NONE') {
-      if ('layoutSizingHorizontal' in node) node.layoutSizingHorizontal = 'FILL';
-    } else if (props.width === 'hug') {
-      if ('layoutSizingHorizontal' in node) node.layoutSizingHorizontal = 'HUG';
+      node.layoutSizingHorizontal = 'FIXED';
+    } else if (props.width === 'fill' && hasALParent) {
+      node.layoutSizingHorizontal = 'FILL';
+    } else if (props.width === 'hug' || node.type === 'TEXT' || isALFrame) {
+      node.layoutSizingHorizontal = 'HUG';
     }
   }
 
-  if (props.height !== undefined) {
+  if ('layoutSizingVertical' in node) {
     if (typeof props.height === 'number') {
-      if ('layoutSizingVertical' in node) node.layoutSizingVertical = 'FIXED';
-      node.resize(node.width, props.height);
-    } else if (props.height === 'fill' && node.parent && 'layoutMode' in node.parent && node.parent.layoutMode !== 'NONE') {
-      if ('layoutSizingVertical' in node) node.layoutSizingVertical = 'FILL';
-    } else if (props.height === 'hug') {
-      if ('layoutSizingVertical' in node) node.layoutSizingVertical = 'HUG';
+      node.layoutSizingVertical = 'FIXED';
+    } else if (props.height === 'fill' && hasALParent) {
+      node.layoutSizingVertical = 'FILL';
+    } else if (props.height === 'hug' || node.type === 'TEXT' || isALFrame) {
+      node.layoutSizingVertical = 'HUG';
     }
   }
+
+  // Text Auto-resize logic
+  if (node.type === 'TEXT' && 'textAutoResize' in node) {
+    const hasFixedWidth = typeof props.width === 'number' || props.width === 'fill';
+    const hasFixedHeight = typeof props.height === 'number' || props.height === 'fill';
+
+    if (hasFixedWidth && hasFixedHeight) node.textAutoResize = 'NONE';
+    else if (hasFixedWidth) node.textAutoResize = 'HEIGHT';
+    else node.textAutoResize = 'WIDTH_AND_HEIGHT';
+  }
+
+  if (props.position === 'absolute' && 'layoutPositioning' in node) {
+    if (hasALParent) node.layoutPositioning = 'ABSOLUTE';
+  }
+  
+  if (props.x !== undefined) node.x = props.x;
+  if (props.y !== undefined) node.y = props.y;
 }
 
 figma.ui.onmessage = async (msg) => {

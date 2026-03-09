@@ -126,12 +126,17 @@ class EvalCommand extends Command {
   needsConnection = true;
 
   async execute(ctx, options, code) {
-    if (!code) {
-      ctx.logError('Usage: eval "figma.root.name"');
+    let inputCode = code;
+    if (!inputCode) {
+      inputCode = await readStdin();
+    }
+
+    if (!inputCode) {
+      ctx.logError('Usage: eval "figma.root.name" or pipe into stdin');
       return;
     }
     try {
-      const result = await ctx.eval(code);
+      const result = await ctx.eval(inputCode);
       ctx.logSuccess('Executed', result);
     } catch (err) {
       ctx.logError(`Eval error: ${err.message}`);
@@ -212,10 +217,23 @@ class InspectCommand extends Command {
       
       if (result && result.data) {
         function toJSX(node, indent = '') {
-          const typeMap = { FRAME: 'Frame', RECTANGLE: 'Rectangle', ELLIPSE: 'Ellipse', TEXT: 'Text', LINE: 'Line' };
+          const typeMap = { 
+            FRAME: 'Frame', 
+            RECTANGLE: 'Rectangle', 
+            ELLIPSE: 'Ellipse', 
+            TEXT: 'Text', 
+            LINE: 'Line',
+            SVG: 'SVG'
+          };
           const tag = typeMap[node.type] || 'Frame';
           
           let propEntries = Object.entries(node.props).filter(([k, v]) => v !== undefined && k !== 'text');
+          
+          // For SVG, we handle content specially
+          if (node.type === 'SVG' && node.props.content) {
+            propEntries = propEntries.filter(([k]) => k !== 'content');
+          }
+
           // Prioritize ID
           propEntries.sort(([ak], [bk]) => {
             if (ak === 'id') return -1;
@@ -225,14 +243,19 @@ class InspectCommand extends Command {
 
           let props = propEntries
             .map(([k, v]) => {
-              if (typeof v === 'string') return `${k}="${v}"`;
-              if (typeof v === 'number') return `${k}={${v}}`;
+              // Wrap ALL values in curly braces as per GEMINI.md mandate
+              if (typeof v === 'string') return `${k}={${v}}`;
               return `${k}={${JSON.stringify(v)}}`;
             })
             .join(' ');
           
           if (node.type === 'TEXT' && node.props.text) {
-             return `${indent}<${tag}${props ? ' ' + props : ''}>${node.props.text}</${tag}>`;
+             const text = node.props.text;
+             return `${indent}<${tag}${props ? ' ' + props : ''}>${text}</${tag}>`;
+          }
+
+          if (node.type === 'SVG' && node.props.content) {
+             return `${indent}<${tag}${props ? ' ' + props : ''} content={${node.props.content}} />`;
           }
 
           if (node.children && node.children.length > 0) {

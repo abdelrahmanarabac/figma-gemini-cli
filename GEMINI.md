@@ -7,6 +7,128 @@ You are the lead architect for the `figma-gemini-cli`. Your goal is to generate 
 
 ## 🏛️ Architectural Mandates: Stability & Fidelity
 
+### Agent Initialization and Safety Rules
+
+The command "hello" must act as a system initialization command, not a greeting.
+
+When the user types "hello", execute the following sequence.
+
+---
+
+Step 1 — Full Project Inspection
+
+Scan the entire project.
+
+Tasks:
+
+* Inspect all folders and source files.
+* Identify the rendering pipeline.
+* Locate reverse JSX logic.
+* Identify Figma plugin code.
+* Understand the CLI commands.
+
+Build a clear internal model of the system architecture.
+
+---
+
+Step 2 — Documentation Priority
+
+Locate and read the following files carefully:
+
+* GEMINI.md
+* REFERENCE.md
+
+These files are the authoritative documentation for the project.
+
+Requirements:
+
+* Read them completely.
+* Extract all rules and constraints.
+* Identify any instructions related to agent behavior.
+* Identify pipeline rules and command usage.
+
+Do not skip any sections.
+
+---
+
+Step 3 — Design Rules Focus
+
+While reading documentation, give special attention to:
+
+* design system rules
+* layout conventions
+* component structure
+* spacing systems
+* typography hierarchy
+* icon usage rules
+* rendering constraints
+
+All design generation must strictly follow these rules.
+
+---
+
+Step 4 — User Visibility Restrictions
+
+The user must NOT see internal implementation code.
+
+Rules:
+
+* Do not print source code to the user.
+* Do not expose internal implementation details.
+* Do not display system files or project code in the output.
+
+Only show user-facing results such as rendered designs or summaries.
+
+---
+
+Step 5 — File Creation Restrictions
+
+Avoid creating files during rendering or testing.
+
+Rules:
+
+* Do not generate files simply to force rendering.
+* Prefer in-memory operations whenever possible.
+
+If creating a temporary file becomes absolutely necessary:
+
+1. Create it only for the required operation.
+2. Use it temporarily.
+3. Delete it immediately after the operation is complete.
+
+No temporary artifacts should remain in the project.
+
+---
+
+Step 6 — SVG Safety Rule
+
+The agent must NOT generate SVG elements automatically.
+
+Rule:
+
+Only generate or include SVG elements if the user explicitly writes or requests "svg".
+
+If the design requires icons but the user did not request SVG:
+
+* ask for confirmation
+* do not auto-generate icons
+
+---
+
+Final Rule
+
+The command "hello" initializes the system.
+
+It prepares the agent by:
+
+* understanding the entire project
+* reading GEMINI.md and REFERENCE.md
+* internalizing design rules
+* enforcing user visibility and file safety constraints
+
+Only after this initialization may the agent perform design, rendering, or reverse JSX tasks.
+
+
 ### 1. Connection & Module Safety (CRITICAL)
 - **NO `FigmaClient` or `FigJamClient`**: These modules are deprecated. Never attempt to import or use them.
 - **Connection Agnosticism**: Always use the `ctx` abstraction (`ctx.render()`, `ctx.eval()`, `ctx.command()`) to ensure compatibility with the plugin-based daemon.

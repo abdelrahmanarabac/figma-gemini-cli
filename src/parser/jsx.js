@@ -17,8 +17,8 @@ const COMPONENT_MAP = {
     'Component': 'COMPONENT',
     'Instance': 'INSTANCE',
     'Image': 'RECTANGLE',    // Image is a rectangle with image fill
-    'Icon': 'FRAME',         // Icon is usually a frame or svg
-    'SVG': 'FRAME',
+    'Icon': 'SVG',         // Icon is usually a frame or svg
+    'SVG': 'SVG',
 };
 
 // Map JSX prop names → Figma API property names
@@ -37,6 +37,10 @@ const PROP_MAP = {
     strokeWidth: 'strokeWidth',
     opacity: 'opacity',
     cornerRadius: 'cornerRadius', rounded: 'cornerRadius',
+    roundedT: 'topRadius', roundedB: 'bottomRadius',
+    roundedL: 'leftRadius', roundedR: 'rightRadius',
+    roundedTL: 'topLeftRadius', roundedTR: 'topRightRadius',
+    roundedBL: 'bottomLeftRadius', roundedBR: 'bottomRightRadius',
     flex: 'layoutMode',
     gap: 'itemSpacing',
     wrap: 'layoutWrap',
@@ -68,7 +72,8 @@ const PROP_MAP = {
 
 const NUMERIC_PROPS = new Set([
     'width', 'height', 'minWidth', 'maxWidth', 'minHeight', 'maxHeight',
-    'cornerRadius', 'itemSpacing', 'padding', 'paddingTop', 'paddingRight', 
+    'cornerRadius', 'topLeftRadius', 'topRightRadius', 'bottomLeftRadius', 'bottomRightRadius',
+    'itemSpacing', 'padding', 'paddingTop', 'paddingRight', 
     'paddingBottom', 'paddingLeft', 'paddingHorizontal', 'paddingVertical',
     'fontSize', 'fontWeight', 'opacity', 'x', 'y', 'rotation', 'strokeWidth',
     'blur', 'backdropBlur', 'letterSpacing', 'lineHeight'
@@ -176,17 +181,22 @@ function parseProps(propsStr) {
 }
 
 /**
- * Finds the actual end of an opening tag, skipping strings.
+ * Finds the actual end of an opening tag, skipping strings and braces.
  */
 function findEndOfTag(str) {
     let inQuote = null;
+    let braceDepth = 0;
     let i = 0;
     while (i < str.length) {
         const char = str[i];
         if ((char === '"' || char === "'") && (i === 0 || str[i-1] !== '\\')) {
             if (!inQuote) inQuote = char;
             else if (inQuote === char) inQuote = null;
-        } else if (char === '>' && !inQuote) {
+        } else if (char === '{' && !inQuote) {
+            braceDepth++;
+        } else if (char === '}' && !inQuote) {
+            braceDepth--;
+        } else if (char === '>' && !inQuote && braceDepth === 0) {
             return i;
         }
         i++;
