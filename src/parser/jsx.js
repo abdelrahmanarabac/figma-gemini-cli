@@ -230,7 +230,7 @@ function generateDataVisualization(tagName, props) {
 
 /**
  * Enhanced Prop Parser
- * Handles: multiline, quotes, and nested braces (up to 1 level for common usage).
+ * Handles: multiline, quotes, and nested braces.
  */
 function parseProps(propsStr) {
     const props = {};
@@ -251,16 +251,23 @@ function parseProps(propsStr) {
                     const quote = propsStr[i];
                     i++;
                     let valStart = i;
-                    while (i < propsStr.length && (propsStr[i] !== quote || propsStr[i-1] === '\\')) i++;
+                    while (i < propsStr.length && (propsStr[i] !== quote || (propsStr[i-1] === '\\' && propsStr[i-2] !== '\\'))) i++;
                     value = propsStr.slice(valStart, i).replace(/\\"/g, '"').replace(/\\'/g, "'");
                     i++;
                 } else if (propsStr[i] === '{') {
                     i++;
                     let valStart = i;
                     let braceDepth = 1;
+                    let inQuote = null;
                     while (i < propsStr.length && braceDepth > 0) {
-                        if (propsStr[i] === '{') braceDepth++;
-                        else if (propsStr[i] === '}') braceDepth--;
+                        const c = propsStr[i];
+                        if ((c === '"' || c === "'") && propsStr[i-1] !== '\\') {
+                            if (!inQuote) inQuote = c;
+                            else if (inQuote === c) inQuote = null;
+                        } else if (!inQuote) {
+                            if (c === '{') braceDepth++;
+                            else if (c === '}') braceDepth--;
+                        }
                         if (braceDepth > 0) i++;
                     }
                     value = propsStr.slice(valStart, i);
@@ -297,15 +304,27 @@ function findEndOfTag(str) {
     let i = 0;
     while (i < str.length) {
         const char = str[i];
-        if ((char === '"' || char === "'") && (i === 0 || str[i-1] !== '\\')) {
-            if (!inQuote) inQuote = char;
-            else if (inQuote === char) inQuote = null;
-        } else if (char === '{' && !inQuote) {
-            braceDepth++;
-        } else if (char === '}' && !inQuote) {
-            braceDepth--;
-        } else if (char === '>' && !inQuote && braceDepth === 0) {
-            return i;
+        
+        if (char === '"' || char === "'") {
+            // Check for escapes
+            let isEscaped = false;
+            let j = i - 1;
+            while (j >= 0 && str[j] === '\\') {
+                isEscaped = !isEscaped;
+                j--;
+            }
+            if (!isEscaped) {
+                if (!inQuote) inQuote = char;
+                else if (inQuote === char) inQuote = null;
+            }
+        } else if (!inQuote) {
+            if (char === '{') {
+                braceDepth++;
+            } else if (char === '}') {
+                braceDepth--;
+            } else if (char === '>' && braceDepth === 0) {
+                return i;
+            }
         }
         i++;
     }

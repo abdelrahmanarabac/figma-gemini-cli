@@ -160,8 +160,10 @@ const handlers = {
 
   'eval': async (params) => {
     try {
-      const result = await eval(`(async () => { ${params.code} })()`);
-      return result;
+      // Create an async function wrapper that provides 'figma' and other globals
+      const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+      const fn = new AsyncFunction('figma', params.code);
+      return await fn(figma);
     } catch (err) {
       throw new Error(`Eval failed: ${err.message}`);
     }
@@ -364,13 +366,19 @@ let lastCacheUpdate = 0;
 const CACHE_TIMEOUT = 5000; // 5 seconds
 
 async function getVariableCache() {
+  if (!figma.variables) return [];
   const now = Date.now();
   if (!variableCache || (now - lastCacheUpdate > CACHE_TIMEOUT)) {
-    const vars = await figma.variables.getLocalVariablesAsync();
-    variableCache = vars;
-    lastCacheUpdate = now;
+    try {
+      const vars = await figma.variables.getLocalVariablesAsync();
+      variableCache = vars;
+      lastCacheUpdate = now;
+    } catch (e) {
+      console.warn('[FigCli] Variable cache update failed:', e.message);
+      return [];
+    }
   }
-  return variableCache;
+  return variableCache || [];
 }
 
 async function findVariableByName(name) {
