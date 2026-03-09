@@ -3,13 +3,14 @@
  * Sends structured commands via HTTP, receives JSON responses.
  */
 
-const DAEMON_URL = `http://127.0.0.1:${process.env.DAEMON_PORT || 3456}`;
+const PORT = parseInt(process.env.DAEMON_PORT) || 3456;
+const DAEMON_URL = `http://127.0.0.1:${PORT}`;
 
 /**
  * Send a structured command to the daemon.
  * @param {string} command - Command name (e.g. 'node.create')
  * @param {object} params - Command parameters
- * @param {{ timeout?: number }} opts
+ * @param {{ timeout?: number, retries?: number }} opts
  * @returns {Promise<{ status: string, data?: any, error?: any }>}
  */
 export async function sendCommand(command, params = {}, opts = {}) {
@@ -33,29 +34,25 @@ export async function sendCommand(command, params = {}, opts = {}) {
 
             if (!res.ok) {
                 const errorMsg = data.error || `Daemon returned ${res.status}`;
-                throw new Error(`[Transport Error] Command: ${command} | Action: ${params.id || 'N/A'} | Details: ${errorMsg}`);
+                throw new Error(`[Transport Error] Command: ${command} | Detail: ${errorMsg}`);
             }
 
             return data;
         } catch (err) {
             lastError = err;
-            if (err.name === 'AbortError') {
-                // If timed out, maybe the daemon is busy, retry?
-                continue;
-            }
+            if (err.name === 'AbortError') continue;
             if (err.cause?.code === 'ECONNREFUSED' || err.message.includes('fetch failed')) {
-                // If connection refused, wait a bit and retry (in case daemon is restarting)
                 await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
                 continue;
             }
-            throw err; // For other errors (parsing, etc.), fail early
+            throw err;
         } finally {
             clearTimeout(timer);
         }
     }
 
-    if (lastError.cause?.code === 'ECONNREFUSED') {
-        throw new Error('[Connection Error] Daemon unreachable at ' + DAEMON_URL + '. Ensure the CLI daemon is running ("figma-gemini-cli connect").');
+    if (lastError?.cause?.code === 'ECONNREFUSED') {
+        throw new Error(`[Connection Error] Daemon unreachable at ${DAEMON_URL}. Ensure "figma-gemini-cli connect" is running.`);
     }
     throw lastError;
 }

@@ -1,73 +1,38 @@
-import chalk from 'chalk';
-
-const GEMINI_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
-
-async function callGemini(body) {
-    const key = process.env.GEMINI_API_KEY;
-    const res = await fetch(`${GEMINI_URL}?key=${key}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-    });
-
-    if (!res.ok) {
-        const text = await res.text();
-        throw new Error(`Gemini API ${res.status}: ${text.slice(0, 200)}`);
-    }
-
-    return res.json();
-}
+import { execSync } from 'child_process';
 
 /**
- * Calls Gemini with strict system instruction to generate raw JSX for a design prompt.
- * Returns: raw string from Gemini (must be sanitized before use).
+ * Gemini AI Client
+ * 
+ * Uses the locally installed 'gemini' CLI to perform generations.
+ * This ensures we use the user's existing authentication and configuration.
  */
+
 export async function generateDesign(prompt) {
-    const systemPrompt = `Role: You are a highly specialized headless UI rendering engine for Figma. Your sole purpose is to translate design requirements into syntactically perfect JSX representing Figma nodes.
-
-Constraints (CRITICAL):
-1. ZERO Natural Language: You must NEVER output conversational text, greetings, explanations, or thoughts. No "Here is the code" or "Sure!".
-2. ZERO Markdown Formatting: Do NOT wrap your output in markdown code blocks. Output the raw text only.
-3. ZERO CLI Commands: Do not output shell or terminal commands.
-4. Root Node: Your output MUST always have a single root node, typically <Frame> or <Component>.
-
-JSX DSL:
-- <Frame> container, <Text> text, <Rectangle> shape, <Ellipse> circle, <Component> reusable
-- <SVG content="<svg>...</svg>"> vector graphic (use for icons)
-- Layout: flex="row"|"col", gap={N}, p={N}, px={N}, py={N}
-- Size: w={N}, h={N}, w="fill", h="fill"
-- Style: bg="#hex", rounded={N}, opacity={N}, stroke="#hex", strokeWidth={N}
-- Text: <Text size={N} weight="bold" color="#hex" w="fill">content</Text>
-- Alignment: justify="center|start|end", items="center|start|end"
-- Growth: grow={1}
-- Name: name="Layer Name"
-
+    // We wrap the prompt to ensure it generates high-fidelity JSX
+    const systemPrompt = `Act as a Senior UI Designer. Generate 100% Figma-compatible JSX for the following request: "${prompt}".
 Rules:
-1. Output ONLY JSX. Nothing else.
-2. Create complete, visually rich designs — not skeletons.
-3. Use dark modern aesthetic (#0a0a0f backgrounds, white text) unless told otherwise.
-4. Use <SVG> for icons, falling back to shapes only if necessary.
-5. Root frame MUST have a fixed width (320 for cards, 1440 for pages).
-6. ALL text that might wrap MUST have w="fill" on both the Text and its parent.
-7. Use realistic content — real names, real descriptions, real prices.
-8. Buttons need flex="row" justify="center" items="center" for centered text.`;
+1. Use only supported components: <Frame>, <Text>, <Rectangle>, <Ellipse>, <Line>, <SVG>.
+2. Use professional aesthetics: rounded={12}, p={24}, gap={16}.
+3. ALL Frames MUST have w and h values (e.g., w={1440} h={1024}).
+4. Use valid CSS-like colors (e.g., bg={#ffffff}).
+5. Always wrap values in curly braces {}.
+6. ICONS: Use <SVG /> for ALL icons. Provide valid XML in content={}. Default icons to w={24} h={24}.
+7. Output ONLY the JSX code block. No explanation.`;
 
-    const body = {
-        system_instruction: { parts: [{ text: systemPrompt }] },
-        contents: [{
-            role: 'user',
-            parts: [{ text: prompt }]
-        }],
-        generationConfig: { temperature: 0.7 }
-    };
+    try {
+        // Execute 'gemini' CLI
+        const command = `gemini "${systemPrompt.replace(/"/g, '\\"')}"`;
+        const output = execSync(command, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+        
+        if (!output) {
+            throw new Error('Gemini CLI returned empty output');
+        }
 
-    const result = await callGemini(body);
-    const candidate = result.candidates?.[0];
-    const text = candidate?.content?.parts?.[0]?.text;
-
-    if (!text) {
-        throw new Error('AI returned empty response.');
+        return output;
+    } catch (err) {
+        if (err.stderr) {
+            throw new Error(`Gemini CLI Error: ${err.stderr}`);
+        }
+        throw new Error(`AI generation failed: ${err.message}`);
     }
-
-    return text;
 }

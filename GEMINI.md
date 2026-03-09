@@ -98,20 +98,13 @@ If creating a temporary file becomes absolutely necessary:
 
 No temporary artifacts should remain in the project.
 
----
+### Step 6 — Icon Fidelity Mandate
 
-Step 6 — SVG Safety Rule
-
-The agent must NOT generate SVG elements automatically.
+The agent MUST use SVG icons for all visual indicators, buttons, and decorative elements.
 
 Rule:
 
-Only generate or include SVG elements if the user explicitly writes or requests "svg".
-
-If the design requires icons but the user did not request SVG:
-
-* ask for confirmation
-* do not auto-generate icons
+Always generate valid `<SVG />` elements with `content={...}` when a design requires an icon. Do not use text labels as icon placeholders.
 
 ---
 
@@ -147,6 +140,11 @@ Only after this initialization may the agent perform design, rendering, or rever
 ### 3. Shell Compatibility (Windows/PowerShell)
 - **The Curly Brace Rule**: Always wrap ALL property values in curly braces `{}` (e.g., `name={Card}`, `bg={#ffffff}`, `flex={row}`). This is the ONLY way to prevent Windows PowerShell from mangling quotes inside JSX.
 
+### 4. SVG & Icon Standards (MANDATORY)
+- **Always Use SVGs**: All icons MUST be represented using the `<SVG />` tag with valid XML content.
+- **Icon Sizing**: Default icons to `w={24} h={24}`.
+- **Fidelity**: Ensure SVGs are clean and follow the design's aesthetic.
+
 ---
 
 ## 🎨 Token & Modification Workflow (CRITICAL)
@@ -177,6 +175,7 @@ When a user requests to **modify** an existing design or **apply tokens**:
 - **NO `padding`**: Use `p`, `px`, `py`, `pt`, `pr`, `pb`, `pl`.
 - **NO `layout`**: Use `flex={row}` or `flex={col}`.
 - **NO `alignItems` / `justifyContent`**: Use `items` and `justify`.
+- **NO Icon Placeholders**: Never use text labels (e.g., "Icon") where an icon is expected; always provide a functional `<SVG />`.
 
 ---
 

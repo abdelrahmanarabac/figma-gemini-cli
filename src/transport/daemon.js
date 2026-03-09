@@ -206,7 +206,18 @@ try {
     process.exit(1);
 }
 
-process.on('SIGINT', () => {
-    if (existsSync(PID_FILE)) unlinkSync(PID_FILE);
+function cleanup() {
+    log('Daemon shutting down...');
+    if (existsSync(PID_FILE)) {
+        try { unlinkSync(PID_FILE); } catch (e) { log(`Failed to delete PID file: ${e.message}`); }
+    }
     process.exit(0);
+}
+
+process.on('SIGINT', cleanup);
+process.on('SIGTERM', cleanup);
+process.on('exit', () => {
+    if (existsSync(PID_FILE)) {
+        try { unlinkSync(PID_FILE); } catch (e) {}
+    }
 });

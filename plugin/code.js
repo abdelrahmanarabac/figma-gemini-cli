@@ -324,7 +324,9 @@ async function createNodeTransaction(type, props, parentId) {
       if (props.content) {
         try {
           node = figma.createNodeFromSvg(props.content);
-          if (props.width && props.height) node.resize(props.width, props.height);
+          const targetW = typeof props.width === 'number' ? props.width : 100;
+          const targetH = typeof props.height === 'number' ? props.height : 100;
+          node.resize(targetW, targetH);
         } catch (e) {
           throw new Error(`SVG Creation failed: ${e.message}`);
         }
@@ -356,10 +358,24 @@ async function createNodeTransaction(type, props, parentId) {
 
 // ── Utils ────────────────────────────────────────────
 
+// ── Variable & Token Cache ───────────────────────────
+let variableCache = null;
+let lastCacheUpdate = 0;
+const CACHE_TIMEOUT = 5000; // 5 seconds
+
+async function getVariableCache() {
+  const now = Date.now();
+  if (!variableCache || (now - lastCacheUpdate > CACHE_TIMEOUT)) {
+    const vars = await figma.variables.getLocalVariablesAsync();
+    variableCache = vars;
+    lastCacheUpdate = now;
+  }
+  return variableCache;
+}
+
 async function findVariableByName(name) {
   if (!name || typeof name !== 'string') return null;
-  const vars = await figma.variables.getLocalVariablesAsync();
-  // Match by name (e.g. "slate/500") or full path, case-insensitive and whitespace-agnostic
+  const vars = await getVariableCache();
   const clean = (s) => s.toLowerCase().replace(/\s+/g, '');
   const searchName = clean(name);
   return vars.find(v => clean(v.name) === searchName);
@@ -448,12 +464,96 @@ function parseInnerShadow(str) {
   };
 }
 
+function parseGradient(str) {
+  if (!str || typeof str !== 'string' || !str.includes('gradient')) return null;
+
+  const isLinear = str.startsWith('linear-gradient');
+  const isRadial = str.startsWith('radial-gradient');
+  const isAngular = str.startsWith('conic-gradient');
+  if (!isLinear && !isRadial && !isAngular) return null;
+
+  const contentMatch = str.match(/\((.*)\)/);
+  if (!contentMatch) return null;
+  const content = contentMatch[1];
+  const parts = content.split(/,(?![^(]*\))/).map(p => p.trim());
+  
+  let angle = 180;
+  let stopsStartIdx = 0;
+
+  if (isLinear) {
+    if (parts[0].includes('deg')) {
+      angle = parseFloat(parts[0]);
+      stopsStartIdx = 1;
+    } else if (parts[0].startsWith('to ')) {
+      const dir = parts[0].replace('to ', '');
+      if (dir === 'right') angle = 90;
+      else if (dir === 'bottom') angle = 180;
+      else if (dir === 'left') angle = 270;
+      else if (dir === 'top') angle = 0;
+      stopsStartIdx = 1;
+    }
+  } else if (isRadial || isAngular) {
+    if (parts[0].includes('at ') || parts[0].includes('from ') || parts[0] === 'circle' || parts[0] === 'ellipse') {
+      stopsStartIdx = 1;
+    }
+  }
+
+  const stops = parts.slice(stopsStartIdx).map((s, i, arr) => {
+    const stopParts = s.split(/\s+(?![^(]*\))/);
+    const colorStr = stopParts[0];
+    const offsetStr = stopParts[1];
+    
+    const color = parseColor(colorStr);
+    let position = i / (arr.length - 1);
+    if (offsetStr && offsetStr.includes('%')) {
+      position = parseFloat(offsetStr) / 100;
+    }
+
+    return {
+      color: { r: color.r, g: color.g, b: color.b, a: color.a !== undefined ? color.a : 1 },
+      position
+    };
+  });
+
+  if (isLinear) {
+    const rad = (angle - 90) * (Math.PI / 180);
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    return {
+      type: 'GRADIENT_LINEAR',
+      gradientStops: stops,
+      gradientTransform: [
+        [cos, sin, (1 - cos - sin) / 2],
+        [-sin, cos, (1 + sin - cos) / 2]
+      ]
+    };
+  } else if (isRadial) {
+    return {
+      type: 'GRADIENT_RADIAL',
+      gradientStops: stops,
+      gradientTransform: [
+        [1, 0, 0],
+        [0, 1, 0]
+      ]
+    };
+  } else {
+    return {
+      type: 'GRADIENT_ANGULAR',
+      gradientStops: stops,
+      gradientTransform: [
+        [1, 0, 0],
+        [0, 1, 0]
+      ]
+    };
+  }
+}
+
 async function serializeNode(node) {
   const hasALParent = node.parent && 'layoutMode' in node.parent && node.parent.layoutMode !== 'NONE';
 
   const props = {
     id: node.id,
-    name: node.name,
+    name: node.name || node.type.toLowerCase().replace(/^\w/, (c) => c.toUpperCase()),
     opacity: node.opacity !== 1 ? parseFloat(node.opacity.toFixed(2)) : undefined,
   };
 
@@ -540,14 +640,60 @@ async function serializeNode(node) {
 
   if ('fills' in node && Array.isArray(node.fills) && node.fills.length > 0) {
     const varName = await resolveVariable(node, 'fills');
-    if (varName) props.fill = varName;
-    else if (node.fills[0].type === 'SOLID') props.fill = serializeColor(node.fills[0].color, node.fills[0].opacity);
+    if (varName) {
+      props.fill = varName;
+    } else {
+      const fillStrs = node.fills.map(f => {
+        if (f.type === 'SOLID') return serializeColor(f.color, f.opacity);
+        if (f.type === 'GRADIENT_LINEAR' || f.type === 'GRADIENT_RADIAL' || f.type === 'GRADIENT_ANGULAR') {
+          const stops = f.gradientStops.map(s => `${serializeColor(s.color, s.color.a)} ${Math.round(s.position * 100)}%`).join(', ');
+          if (f.type === 'GRADIENT_LINEAR') {
+             // Extract angle from gradientTransform
+             let angle = 180;
+             if (f.gradientTransform) {
+                const [[a, b], [c, d]] = f.gradientTransform;
+                const rad = Math.atan2(b, a);
+                angle = Math.round((rad * 180 / Math.PI) + 90);
+                if (angle < 0) angle += 360;
+             }
+             return `linear-gradient(${angle}deg, ${stops})`;
+          }
+          if (f.type === 'GRADIENT_ANGULAR') {
+             return `conic-gradient(from 180deg, ${stops})`;
+          }
+          return `radial-gradient(circle, ${stops})`;
+        }
+        return null;
+      }).filter(Boolean);
+      
+      if (fillStrs.length === 1) props.fill = fillStrs[0];
+      else if (fillStrs.length > 1) props.fill = `[${fillStrs.join(', ')}]`;
+    }
   }
 
   if ('strokes' in node && Array.isArray(node.strokes) && node.strokes.length > 0) {
     const varName = await resolveVariable(node, 'strokes');
-    if (varName) props.stroke = varName;
-    else if (node.strokes[0].type === 'SOLID') props.stroke = serializeColor(node.strokes[0].color, node.strokes[0].opacity);
+    if (varName) {
+      props.stroke = varName;
+    } else {
+      if (node.strokes[0].type === 'SOLID') {
+        props.stroke = serializeColor(node.strokes[0].color, node.strokes[0].opacity);
+      } else if (node.strokes[0].type === 'GRADIENT_LINEAR' || node.strokes[0].type === 'GRADIENT_RADIAL') {
+        const stops = node.strokes[0].gradientStops.map(s => `${serializeColor(s.color, s.color.a)} ${Math.round(s.position * 100)}%`).join(', ');
+        if (node.strokes[0].type === 'GRADIENT_LINEAR') {
+           let angle = 180;
+           if (node.strokes[0].gradientTransform) {
+              const [[a, b], [c, d]] = node.strokes[0].gradientTransform;
+              const rad = Math.atan2(b, a);
+              angle = Math.round((rad * 180 / Math.PI) + 90);
+              if (angle < 0) angle += 360;
+           }
+           props.stroke = `linear-gradient(${angle}deg, ${stops})`;
+        } else {
+           props.stroke = `radial-gradient(circle, ${stops})`;
+        }
+      }
+    }
     props.strokeWidth = node.strokeWeight;
   }
 
@@ -581,7 +727,7 @@ async function serializeNode(node) {
   if (isIconLike) {
     try {
       const svg = await node.exportAsync({ format: 'SVG' });
-      props.content = String.fromCharCode(...svg);
+      props.content = new TextDecoder().decode(svg);
       finalType = 'SVG';
     } catch (e) {
       console.warn('Failed to export icon SVG:', e.message);
@@ -759,7 +905,7 @@ async function applyPropsToNode(node, props) {
     node.resize(targetW, targetH);
   }
 
-  // Styling (Solid colors and Variable Bindings)
+  // Styling (Solid colors, Gradients, Layered Fills, and Variable Bindings)
   if (props.fill) {
     const v = await findVariableByName(props.fill);
     if (v) {
@@ -769,18 +915,46 @@ async function applyPropsToNode(node, props) {
         boundVariables: { color: { type: 'VARIABLE_ALIAS', id: v.id } }
       }];
     } else {
-      const c = parseColor(props.fill);
-      if (c) {
-        if ('a' in c) {
-          node.fills = [{ type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a }];
-        } else {
-          node.fills = [{ type: 'SOLID', color: c }];
+      const parseFill = (f) => {
+        const g = parseGradient(f);
+        if (g) return g;
+        const c = parseColor(f);
+        if (c) return { type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a !== undefined ? c.a : 1 };
+        return null;
+      };
+
+      function splitFills(str) {
+        const result = [];
+        let current = '';
+        let depth = 0;
+        for (let i = 0; i < str.length; i++) {
+          const char = str[i];
+          if (char === '(') depth++;
+          else if (char === ')') depth--;
+          
+          if (char === ',' && depth === 0) {
+            result.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
         }
+        if (current) result.push(current.trim());
+        return result;
+      }
+
+      if (typeof props.fill === 'string' && props.fill.startsWith('[') && props.fill.endsWith(']')) {
+        const items = splitFills(props.fill.slice(1, -1));
+        node.fills = items.map(parseFill).filter(Boolean);
+      } else {
+        const singleFill = parseFill(props.fill);
+        if (singleFill) node.fills = [singleFill];
       }
     }
   } else if (node.type === 'FRAME' && !('fills' in props)) {
     node.fills = []; // Frames transparent by default if not specified
   }
+
 
   if (props.stroke) {
     const v = await findVariableByName(props.stroke);
@@ -791,12 +965,17 @@ async function applyPropsToNode(node, props) {
         boundVariables: { color: { type: 'VARIABLE_ALIAS', id: v.id } }
       }];
     } else {
-      const c = parseColor(props.stroke);
-      if (c) {
-        if ('a' in c) {
-          node.strokes = [{ type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a }];
-        } else {
-          node.strokes = [{ type: 'SOLID', color: c }];
+      const gradient = parseGradient(props.stroke);
+      if (gradient) {
+        node.strokes = [gradient];
+      } else {
+        const c = parseColor(props.stroke);
+        if (c) {
+          if ('a' in c) {
+            node.strokes = [{ type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a }];
+          } else {
+            node.strokes = [{ type: 'SOLID', color: c }];
+          }
         }
       }
     }

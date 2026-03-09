@@ -67,7 +67,7 @@ cd figma-gemini-cli
 # 3. Install project dependencies
 npm install
 
-4. Gemini
+# 4. Gemini
 gemini
 
 # 5. Install the Figma Plugin by

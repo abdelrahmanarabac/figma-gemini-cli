@@ -19,6 +19,7 @@ class RenderCommand extends Command {
     this.options = [
       { flags: '-f, --file <path>', description: 'Read JSX from file' },
       { flags: '-c, --code <code>', description: 'Pass JSX as a raw string' },
+      { flags: '-d, --dry-run', description: 'Output generated commands without rendering' },
       { flags: '-v, --verbose', description: 'Show detailed logs' }
     ];
   }
@@ -41,6 +42,14 @@ class RenderCommand extends Command {
 
     if (!inputJsx) {
       ctx.logError('No JSX provided. Use -f <file>, -c "<code>", or pipe into stdin.');
+      return;
+    }
+
+    if (options.dryRun) {
+      const { parseJSX } = await import('../parser/jsx.js');
+      const { commands } = parseJSX(inputJsx);
+      ctx.logSuccess('Dry-run complete. Commands:');
+      console.log(JSON.stringify(commands, null, 2));
       return;
     }
 
@@ -244,7 +253,8 @@ class InspectCommand extends Command {
           let props = propEntries
             .map(([k, v]) => {
               // Wrap ALL values in curly braces as per GEMINI.md mandate
-              if (typeof v === 'string') return `${k}={${v}}`;
+              // Use JSON.stringify for strings to ensure proper escaping and quotes
+              if (typeof v === 'string') return `${k}={${JSON.stringify(v)}}`;
               return `${k}={${JSON.stringify(v)}}`;
             })
             .join(' ');

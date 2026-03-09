@@ -35,22 +35,32 @@ export class CliRouter {
    * @param {string} dir - Absolute path to commands directory
    */
   async discoverCommands(dir) {
+    const getAllFiles = (dirPath, arrayOfFiles = []) => {
+      const files = readdirSync(dirPath);
+      files.forEach((file) => {
+        const fullPath = join(dirPath, file);
+        if (readdirSync(dirPath, { withFileTypes: true }).find(f => f.name === file).isDirectory()) {
+          arrayOfFiles = getAllFiles(fullPath, arrayOfFiles);
+        } else if (file.endsWith('.js')) {
+          arrayOfFiles.push(fullPath);
+        }
+      });
+      return arrayOfFiles;
+    };
+
     let files;
     try {
-      files = readdirSync(dir).filter(f => f.endsWith('.js'));
-    } catch {
-      return; // No commands directory yet — fine during migration
+      files = getAllFiles(dir);
+    } catch (err) {
+      console.error(chalk.yellow(`⚠ Error reading commands directory: ${dir}`), err.message);
+      return;
     }
 
-    for (const file of files) {
-      const filePath = join(dir, file);
+    for (const filePath of files) {
       const fileUrl = pathToFileURL(filePath).href;
-
       try {
         const mod = await import(fileUrl);
         const exports = mod.default || mod;
-
-        // Support: default export is array of Commands, or a single Command
         const commands = Array.isArray(exports) ? exports : [exports];
 
         for (const cmd of commands) {
@@ -59,8 +69,7 @@ export class CliRouter {
           }
         }
       } catch (err) {
-        // Log but don't crash — one broken command file shouldn't kill the CLI
-        console.error(chalk.yellow(`⚠ Failed to load command file: ${file}`), err.message);
+        console.error(chalk.yellow(`⚠ Failed to load command file: ${filePath}`), err.message);
       }
     }
   }
