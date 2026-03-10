@@ -15,6 +15,8 @@ const COMMANDS = {
     'health': { params: [] },
     'node.create': { params: ['type'], optional: ['name', 'props', 'children', 'parentId'] },
     'batch': { params: ['commands'] },
+    'style.list': { params: [] },
+    'style.update_typography': { params: ['family'], optional: ['pattern', 'weightMap'] },
     'tokens.delete_all': { params: [] },
     'tokens.create_palette': { params: ['colors', 'collectionName'] },
     'tokens.create_shadcn': { params: ['primitives', 'semanticTokens'] },

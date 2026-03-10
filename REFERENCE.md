@@ -50,8 +50,12 @@ node src/index.js tokens radii
 # Enumerate all accessible variables
 node src/index.js var list
 
+# Enumerate all local styles (Text, Paint, Effect, Grid)
+node src/index.js style list
+
 # Search for a distinct variable format
 node src/index.js var find "primary/*"
+```
 
 # Create a variable procedurally
 node src/index.js var create "primary/500" -c "CollectionId" -t COLOR -v "#3b82f6"

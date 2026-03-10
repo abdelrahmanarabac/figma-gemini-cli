@@ -137,8 +137,12 @@ Only after this initialization may the agent perform design, rendering, or rever
 - **Alignment**: Use `justify={between}` for `SPACE_BETWEEN` and `items={center}` for centered layouts.
 - **Visual Depth**: Use subtle shadows (e.g., `shadow={0 4 12 rgba(0,0,0,0.1)}`) and semantic hierarchy in typography.
 
-### 3. Shell Compatibility (Windows/PowerShell)
+### 3. Shell Compatibility (Windows/PowerShell) - CRITICAL
 - **The Curly Brace Rule**: Always wrap ALL property values in curly braces `{}` (e.g., `name={Card}`, `bg={#ffffff}`, `flex={row}`). This is the ONLY way to prevent Windows PowerShell from mangling quotes inside JSX.
+- **The Dollar Sign ($) Rule**: PowerShell treats `$` as a variable prefix. When rendering text that contains currency or literal `$` (e.g., `$12.00`), you MUST escape it with a backtick: `` `$12.00 ``. Failure to do so will result in truncated or empty strings in the design.
+- **Redirection Operator Safety**: Characters like `<` and `>` are reserved in PowerShell. When passing JSX strings with these characters (e.g., `<Frame>` or `<SVG />`), ALWAYS wrap the entire command-line argument in double quotes and ensure internal content is properly escaped or use the `--code` flag.
+- **Command Chaining**: Do NOT use `&&`. Run commands on separate lines or use `;`.
+- **Recursive Listing**: Use `Get-ChildItem -Recurse -File -Name` instead of `dir /s /b`.
 
 ### 4. SVG & Icon Standards (MANDATORY)
 - **Always Use SVGs**: All icons MUST be represented using the `<SVG />` tag with valid XML content.
@@ -149,9 +153,26 @@ Only after this initialization may the agent perform design, rendering, or rever
 
 ## 🎨 Token & Modification Workflow (CRITICAL)
 
-When a user requests to **modify** an existing design or **apply tokens**:
+When a user requests to **create or modify** a design:
 
-1.  **ID Preservation (MANDATORY)**:
+1.  **Tokenized Rendering Workflow (MANDATORY)**:
+    - **Step 1: Inventory Check**: Before generating ANY JSX, you MUST list existing variables and styles:
+      - `node src/index.js var list`
+      - `node src/index.js style list`
+    - **Step 2: No Raw Values**: You are FORBIDDEN from using raw values for:
+      - Colors (Use variables for `fill`, `stroke`)
+      - Font Sizes, Weights, Line Heights (Use Text Styles for `<Text style={...} />`)
+      - Spacing (Use variables for `gap`, `p`, `px`, `py`, etc.)
+      - Corner Radius (Use variables for `rounded`, `roundedT`, etc.)
+      - Shadows (Use Effect Styles if available, or variables)
+    - **Step 3: Missing Token Protocol**: If a required value doesn't exist as a token:
+      - **PROPOSE** the token name and value to the user.
+      - **ASK** for permission to create it before proceeding with the render.
+    - **Step 4: Text Style Application**: All UI text MUST use Text Styles (e.g., `Heading/LG`, `Body/MD`).
+      - Correct: `<Text style={Heading/LG}>Hello</Text>`
+      - Incorrect: `<Text size={24} weight={bold}>Hello</Text>`
+
+2.  **ID Preservation (MANDATORY)**:
     - You MUST capture the existing Node ID before making changes.
     - Use the `inspect <id>` command to retrieve the current JSX.
     - Use the `update <id> "<JSX>"` command to apply changes. 
@@ -201,21 +222,22 @@ When a user requests to **modify** an existing design or **apply tokens**:
 
 ## 🏆 Final Verification Checklist
 1. Are ALL properties wrapped in `{}`?
-2. Did I use `w={fill}` and `h={hug}` for main containers?
-3. Did I avoid using the deprecated `FigmaClient`?
-4. If the prompt was vague, did I provide the CLI's help menu instead of searching?
+2. Did I escape every `$` in the text (e.g., `` `$ ``)?
+3. Did I use `w={fill}` and `h={hug}` for main containers?
+4. Did I avoid using the deprecated `FigmaClient`?
+5. Did I verify the command against `REFERENCE.md`?
 
-## Known CLI Issue: PowerShell `&&` Operator
+## Known CLI Issues & Solutions
 
-Problem:
-Windows PowerShell does not support `&&` command chaining like Bash.
+### PowerShell `&&` Operator
+Problem: Windows PowerShell does not support `&&` command chaining like Bash.
+Solution: Use separate commands instead.
 
-Solution:
-Use separate commands instead:
+### PowerShell Variable Interpolation ($)
+Problem: `$12.00` becomes `,00` in Figma because PowerShell tries to find a variable named `$12`.
+Solution: Escape with backtick: `` `$12.00 ``.
 
-```powershell
-command1
-command2
-```
+### PowerShell Redirection Operator (<, >)
+Problem: `node ... render "<Frame ...>"` fails because `<` is interpreted as a redirection operator.
+Solution: Use `node ... render --code "... <Frame ...> ..."` and ensure the outer string is properly quoted and internal `<` are within the string literal.
 
-Or run the CLI inside **Git Bash / WSL / modern PowerShell**.

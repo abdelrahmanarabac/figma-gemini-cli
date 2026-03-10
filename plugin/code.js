@@ -36,6 +36,79 @@ const handlers = {
     return { deletedCollections: colCount, deletedVariables: varCount + orphans.length };
   },
 
+  'style.list': async () => {
+    const textStyles = await figma.getLocalTextStylesAsync();
+    const paintStyles = await figma.getLocalPaintStylesAsync();
+    const effectStyles = await figma.getLocalEffectStylesAsync();
+    const gridStyles = await figma.getLocalGridStylesAsync();
+
+    return {
+      text: textStyles.map(s => ({ id: s.id, name: s.name, type: 'TEXT' })),
+      paint: paintStyles.map(s => ({ id: s.id, name: s.name, type: 'PAINT' })),
+      effect: effectStyles.map(s => ({ id: s.id, name: s.name, type: 'EFFECT' })),
+      grid: gridStyles.map(s => ({ id: s.id, name: s.name, type: 'GRID' }))
+    };
+  },
+
+  'style.create_text': async (params) => {
+    const { name, fontSize, fontName, lineHeight, letterSpacing, textCase } = params;
+    let s = figma.getLocalTextStyles().find(st => st.name === name);
+    if (!s) s = figma.createTextStyle();
+    s.name = name;
+    
+    if (fontName) {
+      await figma.loadFontAsync(fontName);
+      s.fontName = fontName;
+    }
+    if (fontSize !== undefined) s.fontSize = fontSize;
+    if (lineHeight) s.lineHeight = lineHeight;
+    if (letterSpacing) s.letterSpacing = letterSpacing;
+    if (textCase) s.textCase = textCase;
+
+    return { id: s.id, name: s.name };
+  },
+
+  'style.update_typography': async (params) => {
+    const { family, pattern, weightMap = {} } = params;
+    const styles = await figma.getLocalTextStylesAsync();
+    const regex = pattern ? new RegExp(pattern) : null;
+    const targetStyles = styles.filter(s => !regex || regex.test(s.name));
+    
+    const results = { updated: 0, failed: 0, total: targetStyles.length, errors: [] };
+    
+    for (const style of targetStyles) {
+      const oldFont = style.fontName;
+      // 1. Direct weight mapping or preservation
+      const targetWeight = weightMap[oldFont.style] || oldFont.style;
+      const newFont = { family, style: targetWeight };
+      
+      try {
+        await figma.loadFontAsync(newFont);
+        style.fontName = newFont;
+        results.updated++;
+      } catch (err) {
+        // 2. Intelligent Fallback Strategy
+        const commonWeights = ['Regular', 'Medium', 'Semi Bold', 'Bold', 'Extra Bold', 'Black', 'Light', 'Thin'];
+        let found = false;
+        for (const w of commonWeights) {
+          try {
+            const fallbackFont = { family, style: w };
+            await figma.loadFontAsync(fallbackFont);
+            style.fontName = fallbackFont;
+            results.updated++;
+            found = true;
+            break;
+          } catch (e) {}
+        }
+        if (!found) {
+          results.failed++;
+          results.errors.push(`Style "${style.name}": Could not load "${family}" with weight "${targetWeight}" or any common fallback.`);
+        }
+      }
+    }
+    return results;
+  },
+
   'tokens.create_palette': async (params) => {
     const { colors, collectionName } = params;
     const cols = await figma.variables.getLocalVariableCollectionsAsync();
@@ -387,6 +460,14 @@ async function findVariableByName(name) {
   const clean = (s) => s.toLowerCase().replace(/\s+/g, '');
   const searchName = clean(name);
   return vars.find(v => clean(v.name) === searchName);
+}
+
+async function findStyleByName(name) {
+  if (!name || typeof name !== 'string') return null;
+  const styles = await figma.getLocalTextStylesAsync();
+  const clean = (s) => s.toLowerCase().replace(/\s+/g, '');
+  const searchName = clean(name);
+  return styles.find(s => clean(s.name) === searchName);
 }
 
 function parseColor(str) {
@@ -877,6 +958,14 @@ async function applyPropsToNode(node, props) {
   }
 
   if (node.type === 'TEXT') {
+    // 1. Apply Text Style if provided
+    if (props.style) {
+      const s = await findStyleByName(props.style);
+      if (s) {
+        await node.setTextStyleIdAsync(s.id);
+      }
+    }
+
     const weight = String(props.fontWeight || '400').toLowerCase();
     const styleMap = {
       '100': 'Thin', '200': 'Extra Light', '300': 'Light', '400': 'Regular',
@@ -884,10 +973,20 @@ async function applyPropsToNode(node, props) {
       'thin': 'Thin', 'light': 'Light', 'regular': 'Regular', 'medium': 'Medium', 'bold': 'Bold', 'semibold': 'Semi Bold'
     };
     const style = styleMap[weight] || 'Regular';
-    await figma.loadFontAsync({ family: 'Inter', style });
-    node.fontName = { family: 'Inter', style };
     
-    if (props.fontSize !== undefined) node.fontSize = props.fontSize;
+    // Only set font/size if no style is applied or if explicitly overridden (though style is preferred)
+    if (!node.textStyleId) {
+      await figma.loadFontAsync({ family: 'Inter', style });
+      node.fontName = { family: 'Inter', style };
+      if (props.fontSize !== undefined) node.fontSize = props.fontSize;
+    } else {
+       // Even with a style, we might need to load the font to change characters
+       const styleNode = await figma.getStyleByIdAsync(node.textStyleId);
+       if (styleNode && styleNode.fontName) {
+         await figma.loadFontAsync(styleNode.fontName);
+       }
+    }
+    
     if (props.characters !== undefined) node.characters = props.characters;
 
     if (props.textCase !== undefined) {
@@ -1073,20 +1172,20 @@ async function applyPropsToNode(node, props) {
   const hasALParent = parent && 'layoutMode' in parent && parent.layoutMode !== 'NONE';
   const isALFrame = 'layoutMode' in node && node.layoutMode !== 'NONE';
 
-  if ('layoutSizingHorizontal' in node) {
+  if ('layoutSizingHorizontal' in node && hasALParent) {
     if (typeof props.width === 'number') {
       node.layoutSizingHorizontal = 'FIXED';
-    } else if (props.width === 'fill' && hasALParent) {
+    } else if (props.width === 'fill') {
       node.layoutSizingHorizontal = 'FILL';
     } else if (props.width === 'hug' || node.type === 'TEXT' || isALFrame) {
       node.layoutSizingHorizontal = 'HUG';
     }
   }
 
-  if ('layoutSizingVertical' in node) {
+  if ('layoutSizingVertical' in node && hasALParent) {
     if (typeof props.height === 'number') {
       node.layoutSizingVertical = 'FIXED';
-    } else if (props.height === 'fill' && hasALParent) {
+    } else if (props.height === 'fill') {
       node.layoutSizingVertical = 'FILL';
     } else if (props.height === 'hug' || node.type === 'TEXT' || isALFrame) {
       node.layoutSizingVertical = 'HUG';
