@@ -236,60 +236,63 @@ function parseProps(propsStr) {
     const props = {};
     let i = 0;
     while (i < propsStr.length) {
-        const char = propsStr[i];
-        if (/[a-zA-Z0-9_-]/.test(char)) {
-            let keyStart = i;
-            while (i < propsStr.length && /[a-zA-Z0-9_-]/.test(propsStr[i])) i++;
-            const key = propsStr.slice(keyStart, i);
-            
-            while (i < propsStr.length && /\s/.test(propsStr[i])) i++;
-            if (propsStr[i] === '=') {
-                i++;
-                while (i < propsStr.length && /\s/.test(propsStr[i])) i++;
-                let value;
-                if (propsStr[i] === '"' || propsStr[i] === "'") {
-                    const quote = propsStr[i];
-                    i++;
-                    let valStart = i;
-                    while (i < propsStr.length && (propsStr[i] !== quote || (propsStr[i-1] === '\\' && propsStr[i-2] !== '\\'))) i++;
-                    value = propsStr.slice(valStart, i).replace(/\\"/g, '"').replace(/\\'/g, "'");
-                    i++;
-                } else if (propsStr[i] === '{') {
-                    i++;
-                    let valStart = i;
-                    let braceDepth = 1;
-                    let inQuote = null;
-                    while (i < propsStr.length && braceDepth > 0) {
-                        const c = propsStr[i];
-                        if ((c === '"' || c === "'") && propsStr[i-1] !== '\\') {
-                            if (!inQuote) inQuote = c;
-                            else if (inQuote === c) inQuote = null;
-                        } else if (!inQuote) {
-                            if (c === '{') braceDepth++;
-                            else if (c === '}') braceDepth--;
-                        }
-                        if (braceDepth > 0) i++;
-                    }
-                    value = propsStr.slice(valStart, i);
-                    i++;
-                    
-                    // Attempt to parse JSON or literal
-                    if (value === 'true') value = true;
-                    else if (value === 'false') value = false;
-                    else if (!isNaN(Number(value)) && value.trim() !== '') value = Number(value);
-                } else {
-                    // Bare value
-                    let valStart = i;
-                    while (i < propsStr.length && !/\s/.test(propsStr[i])) i++;
-                    value = propsStr.slice(valStart, i);
-                }
-                const mappedKey = PROP_MAP[key] || key;
-                props[mappedKey] = transformPropValue(mappedKey, value, props);
-            } else {
-                props[PROP_MAP[key] || key] = true;
-            }
-        } else {
+        // Skip whitespace
+        while (i < propsStr.length && /\s/.test(propsStr[i])) i++;
+        if (i >= propsStr.length) break;
+
+        let keyStart = i;
+        while (i < propsStr.length && /[a-zA-Z0-9_-]/.test(propsStr[i])) i++;
+        const key = propsStr.slice(keyStart, i);
+        
+        while (i < propsStr.length && /\s/.test(propsStr[i])) i++;
+        if (propsStr[i] === '=') {
             i++;
+            while (i < propsStr.length && /\s/.test(propsStr[i])) i++;
+            let value;
+            if (propsStr[i] === '"' || propsStr[i] === "'") {
+                const quote = propsStr[i];
+                i++;
+                let valStart = i;
+                // Match until the matching quote, respecting escaped quotes
+                while (i < propsStr.length) {
+                    if (propsStr[i] === quote && propsStr[i-1] !== '\\') break;
+                    i++;
+                }
+                value = propsStr.slice(valStart, i).replace(/\\"/g, '"').replace(/\\'/g, "'");
+                i++;
+            } else if (propsStr[i] === '{') {
+                i++;
+                let valStart = i;
+                let braceDepth = 1;
+                let inQuote = null;
+                while (i < propsStr.length && braceDepth > 0) {
+                    const c = propsStr[i];
+                    if ((c === '"' || c === "'") && propsStr[i-1] !== '\\') {
+                        if (!inQuote) inQuote = c;
+                        else if (inQuote === c) inQuote = null;
+                    } else if (!inQuote) {
+                        if (c === '{') braceDepth++;
+                        else if (c === '}') braceDepth--;
+                    }
+                    if (braceDepth > 0) i++;
+                }
+                value = propsStr.slice(valStart, i);
+                i++;
+                
+                // Attempt to parse JSON or literal
+                if (value === 'true') value = true;
+                else if (value === 'false') value = false;
+                else if (!isNaN(Number(value)) && value.trim() !== '') value = Number(value);
+            } else {
+                // Bare value
+                let valStart = i;
+                while (i < propsStr.length && !/\s/.test(propsStr[i])) i++;
+                value = propsStr.slice(valStart, i);
+            }
+            const mappedKey = PROP_MAP[key] || key;
+            props[mappedKey] = transformPropValue(mappedKey, value, props);
+        } else {
+            props[PROP_MAP[key] || key] = true;
         }
     }
     return props;
@@ -306,16 +309,17 @@ function findEndOfTag(str) {
         const char = str[i];
         
         if (char === '"' || char === "'") {
-            // Check for escapes
-            let isEscaped = false;
-            let j = i - 1;
-            while (j >= 0 && str[j] === '\\') {
-                isEscaped = !isEscaped;
-                j--;
-            }
-            if (!isEscaped) {
-                if (!inQuote) inQuote = char;
-                else if (inQuote === char) inQuote = null;
+            if (!inQuote) {
+                inQuote = char;
+            } else if (inQuote === char) {
+                // Check for escapes
+                let isEscaped = false;
+                let j = i - 1;
+                while (j >= 0 && str[j] === '\\') {
+                    isEscaped = !isEscaped;
+                    j--;
+                }
+                if (!isEscaped) inQuote = null;
             }
         } else if (!inQuote) {
             if (char === '{') {

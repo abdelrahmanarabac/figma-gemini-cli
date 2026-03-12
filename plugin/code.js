@@ -257,9 +257,222 @@ const handlers = {
   'node.update': async (params) => {
     const node = await figma.getNodeByIdAsync(params.id);
     if (!node) throw new Error('Node not found');
-    // Apply props to the existing node using the same transaction logic
+    
+    // 1. Update the root node itself
     await applyPropsToNode(node, params.props || {});
+
+    // 2. Deep update for children using Intelligent Name-Matching
+    if (params.batch && params.batch.length > 1) {
+      const registry = new Map();
+      registry.set(params.batch[0].params.id, node); // Root mapping
+
+      for (let i = 1; i < params.batch.length; i++) {
+        const cmd = params.batch[i];
+        if (cmd.command !== 'node.create') continue;
+        
+        const p = cmd.params || {};
+        const parentNode = registry.get(p.parentId);
+        if (!parentNode || !parentNode.children) continue;
+
+        // HEURISTIC: Find child by name first (Strong Match)
+        const targetName = (p.props && p.props.name) ? p.props.name : null;
+        let child = null;
+        
+        if (targetName) {
+           child = parentNode.children.find(c => c.name === targetName);
+        }
+
+        // FALLBACK: Match by type if only one child of that type exists
+        if (!child) {
+          const sameTypeChildren = parentNode.children.filter(c => c.type === p.type);
+          if (sameTypeChildren.length === 1) {
+            child = sameTypeChildren[0];
+          }
+        }
+
+        if (child) {
+          await applyPropsToNode(child, p.props || {});
+          if (p.id) registry.set(p.id, child);
+        }
+      }
+    }
+
     return { nodeId: node.id, status: 'updated' };
+  },
+
+  'node.hydrate': async (params) => {
+    const { id, data, clone = false, gap = 40 } = params;
+    const sourceNode = await figma.getNodeByIdAsync(id);
+    if (!sourceNode) throw new Error('Source node for hydration not found');
+
+    const records = Array.isArray(data) ? data : [data];
+    const results = [];
+
+    async function injectData(node, entry) {
+      if (node.type === 'TEXT' && node.name.startsWith('#')) {
+        const key = node.name.slice(1);
+        if (entry[key] !== undefined) {
+          await figma.loadFontAsync(node.fontName);
+          node.characters = String(entry[key]);
+        }
+      }
+      if ('children' in node) {
+        for (const child of node.children) {
+          await injectData(child, entry);
+        }
+      }
+    }
+
+    let lastNode = sourceNode;
+    for (let i = 0; i < records.length; i++) {
+      let targetNode = sourceNode;
+      if (clone || i > 0) {
+        targetNode = sourceNode.clone();
+        if ('appendChild' in sourceNode.parent) {
+          sourceNode.parent.appendChild(targetNode);
+        }
+        targetNode.x = lastNode.x + lastNode.width + gap;
+        targetNode.y = lastNode.y;
+        lastNode = targetNode;
+      }
+      
+      await injectData(targetNode, records[i]);
+      results.push({ id: targetNode.id, name: targetNode.name });
+    }
+
+    return { status: 'hydrated', count: results.length, nodes: results };
+  },
+
+  'node.responsive': async (params) => {
+    const { id, breakpoints, gap = 100 } = params;
+    const sourceNode = await figma.getNodeByIdAsync(id);
+    if (!sourceNode) throw new Error('Source node not found');
+
+    const results = [];
+    let lastX = sourceNode.x + sourceNode.width + gap;
+
+    for (const width of breakpoints) {
+      const clone = sourceNode.clone();
+      if ('appendChild' in sourceNode.parent) {
+        sourceNode.parent.appendChild(clone);
+      }
+      
+      clone.name = `${sourceNode.name} (${width}px)`;
+      clone.resize(width, clone.height);
+      clone.x = lastX;
+      clone.y = sourceNode.y;
+      
+      lastX += width + gap;
+      results.push({ id: clone.id, name: clone.name, width });
+    }
+
+    return { status: 'responsive_complete', count: results.length, nodes: results };
+  },
+
+  'node.skeleton': async (params) => {
+    const { id, color = '#e2e8f0', rounded = 4 } = params;
+    const sourceNode = await figma.getNodeByIdAsync(id);
+    if (!sourceNode) throw new Error('Source node not found');
+
+    const clone = sourceNode.clone();
+    clone.name = `${sourceNode.name} (Skeleton)`;
+    if (sourceNode.parent && 'appendChild' in sourceNode.parent) {
+      sourceNode.parent.appendChild(clone);
+    }
+    clone.x = sourceNode.x;
+    clone.y = sourceNode.y + sourceNode.height + 100;
+
+    const skeletonColor = parseColor(color);
+
+    async function skeletonize(node, depth = 0) {
+      try {
+        if (node.type === 'TEXT') {
+          const rect = figma.createRectangle();
+          rect.name = 'SkeletonBar';
+          rect.resize(node.width, node.height);
+          
+          // Bars are always the darkest
+          rect.fills = [{ type: 'SOLID', color: parseColor('#e2e8f0') }];
+          rect.cornerRadius = rounded;
+          
+          if (node.parent && 'layoutMode' in node.parent && node.parent.layoutMode !== 'NONE') {
+             const index = node.parent.children.indexOf(node);
+             try {
+               node.parent.insertChild(index, rect);
+               
+               // Copy sizing modes safely (Rectangles cannot HUG)
+               if ('layoutSizingHorizontal' in node) {
+                 const h = node.layoutSizingHorizontal;
+                 rect.layoutSizingHorizontal = (h === 'FILL') ? 'FILL' : 'FIXED';
+               }
+               if ('layoutSizingVertical' in node) {
+                 const v = node.layoutSizingVertical;
+                 rect.layoutSizingVertical = (v === 'FILL') ? 'FILL' : 'FIXED';
+               }
+             } catch (e) {
+               console.warn(`Failed to insert skeleton bar into parent: ${e.message}`);
+               rect.x = node.x;
+               rect.y = node.y;
+             }
+          } else {
+             rect.x = node.x;
+             rect.y = node.y;
+          }
+          
+          try {
+            node.remove();
+          } catch (e) {
+            console.warn(`Failed to remove original text node: ${e.message}`);
+            node.opacity = 0; // Fallback
+          }
+        } else if (node.type === 'RECTANGLE' || node.type === 'ELLIPSE' || node.type === 'VECTOR') {
+          try {
+            node.fills = [{ type: 'SOLID', color: parseColor('#e2e8f0') }];
+            node.strokes = [];
+            node.effects = [];
+          } catch (e) {}
+        } else if (node.type === 'FRAME' || node.type === 'INSTANCE' || node.type === 'COMPONENT' || node.type === 'GROUP') {
+          let activeNode = node;
+          
+          // If it's an instance, we must detach it to modify its internal hierarchy for the skeleton
+          if (node.type === 'INSTANCE') {
+            try {
+              activeNode = node.detachInstance();
+            } catch (e) {
+              console.warn('Failed to detach instance during skeletonization:', e.message);
+              // If we can't detach, we treat it as a single block
+              node.fills = [{ type: 'SOLID', color: parseColor('#e2e8f0') }];
+              return;
+            }
+          }
+
+          // HIERARCHICAL DEPTH SHADING
+          let frameColor = '#f8fafc'; // Default Depth 0
+          if (depth === 1) frameColor = '#f1f5f9';
+          if (depth >= 2) frameColor = '#e2e8f0';
+
+          try {
+            if ('fills' in activeNode && activeNode.fills !== figma.mixed) {
+               activeNode.fills = [{ type: 'SOLID', color: parseColor(frameColor) }];
+            }
+            if ('strokes' in activeNode) activeNode.strokes = [];
+            if ('effects' in activeNode) activeNode.effects = [];
+          } catch (e) {}
+          
+          if ('children' in activeNode) {
+            const children = [...activeNode.children];
+            for (const child of children) {
+              await skeletonize(child, depth + 1);
+            }
+          }
+        }
+      } catch (err) {
+        console.warn(`Skeletonize error on node ${node.name} (${node.type}):`, err.message);
+      }
+    }
+
+    await skeletonize(clone, 0);
+    return { status: 'skeletonized', id: clone.id, name: clone.name };
   },
 
   'node.create': async (params) => {
@@ -553,7 +766,7 @@ function parseInnerShadow(str) {
   };
 }
 
-function parseGradient(str) {
+async function parseGradient(str) {
   if (!str || typeof str !== 'string' || !str.includes('gradient')) return null;
 
   const isLinear = str.startsWith('linear-gradient');
@@ -587,23 +800,29 @@ function parseGradient(str) {
     }
   }
 
-  const stops = parts.slice(stopsStartIdx).map((s, i, arr) => {
+  const stops = await Promise.all(parts.slice(stopsStartIdx).map(async (s, i, arr) => {
     const stopParts = s.split(/\s+(?![^(]*\))/);
     const colorStr = stopParts[0];
     const offsetStr = stopParts[1];
-    
+
+    const v = await findVariableByName(colorStr);
     const color = parseColor(colorStr);
     let position = i / (arr.length - 1);
     if (offsetStr && offsetStr.includes('%')) {
       position = parseFloat(offsetStr) / 100;
     }
 
-    return {
-      color: { r: color.r, g: color.g, b: color.b, a: color.a !== undefined ? color.a : 1 },
+    const stop = {
+      color: { r: color ? color.r : 0, g: color ? color.g : 0, b: color ? color.b : 0, a: color && color.a !== undefined ? color.a : 1 },
       position
     };
-  });
 
+    if (v) {
+      stop.boundVariables = { color: { type: 'VARIABLE_ALIAS', id: v.id } };
+    }
+
+    return stop;
+  }));
   if (isLinear) {
     const rad = (angle - 90) * (Math.PI / 180);
     const cos = Math.cos(rad);
@@ -1022,8 +1241,8 @@ async function applyPropsToNode(node, props) {
         boundVariables: { color: { type: 'VARIABLE_ALIAS', id: v.id } }
       }];
     } else {
-      const parseFill = (f) => {
-        const g = parseGradient(f);
+      const parseFill = async (f) => {
+        const g = await parseGradient(f);
         if (g) return g;
         const c = parseColor(f);
         if (c) return { type: 'SOLID', color: { r: c.r, g: c.g, b: c.b }, opacity: c.a !== undefined ? c.a : 1 };
@@ -1052,9 +1271,9 @@ async function applyPropsToNode(node, props) {
 
       if (typeof props.fill === 'string' && props.fill.startsWith('[') && props.fill.endsWith(']')) {
         const items = splitFills(props.fill.slice(1, -1));
-        node.fills = items.map(parseFill).filter(Boolean);
+        node.fills = (await Promise.all(items.map(parseFill))).filter(Boolean);
       } else {
-        const singleFill = parseFill(props.fill);
+        const singleFill = await parseFill(props.fill);
         if (singleFill) node.fills = [singleFill];
       }
     }
@@ -1072,7 +1291,7 @@ async function applyPropsToNode(node, props) {
         boundVariables: { color: { type: 'VARIABLE_ALIAS', id: v.id } }
       }];
     } else {
-      const gradient = parseGradient(props.stroke);
+      const gradient = await parseGradient(props.stroke);
       if (gradient) {
         node.strokes = [gradient];
       } else {
@@ -1167,25 +1386,27 @@ async function applyPropsToNode(node, props) {
     }
   }
 
-  // Advanced Layout Sizing (Fill/Hug)
+  // Advanced Layout Sizing (Fill/Hug/Fixed)
   const parent = node.parent;
   const hasALParent = parent && 'layoutMode' in parent && parent.layoutMode !== 'NONE';
   const isALFrame = 'layoutMode' in node && node.layoutMode !== 'NONE';
 
-  if ('layoutSizingHorizontal' in node && hasALParent) {
+  if ('layoutSizingHorizontal' in node) {
     if (typeof props.width === 'number') {
       node.layoutSizingHorizontal = 'FIXED';
-    } else if (props.width === 'fill') {
+      node.resize(props.width, node.height);
+    } else if (props.width === 'fill' && hasALParent) {
       node.layoutSizingHorizontal = 'FILL';
     } else if (props.width === 'hug' || node.type === 'TEXT' || isALFrame) {
       node.layoutSizingHorizontal = 'HUG';
     }
   }
 
-  if ('layoutSizingVertical' in node && hasALParent) {
+  if ('layoutSizingVertical' in node) {
     if (typeof props.height === 'number') {
       node.layoutSizingVertical = 'FIXED';
-    } else if (props.height === 'fill') {
+      node.resize(node.width, props.height);
+    } else if (props.height === 'fill' && hasALParent) {
       node.layoutSizingVertical = 'FILL';
     } else if (props.height === 'hug' || node.type === 'TEXT' || isALFrame) {
       node.layoutSizingVertical = 'HUG';

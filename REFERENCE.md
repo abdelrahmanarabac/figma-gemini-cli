@@ -1,6 +1,6 @@
-# Command Reference
+# Command Reference: figma-gemini-cli
 
-The `figma-gemini-cli` provides an extensive suite of commands manipulating the Figma workspace, design tokens, and FigJam boards.
+The `figma-gemini-cli` provides a comprehensive suite of commands for manipulating the Figma workspace, managing design tokens, and automating design workflows.
 
 ---
 
@@ -20,92 +20,128 @@ node src/index.js connect --safe
 ### Validate and Diagnose
 ```powershell
 node src/index.js status
-node src/index.js daemon status
-node src/index.js daemon restart
 ```
 
 ---
 
 ## 2. Variables & Design Tokens
 
-Inject, manage, and audit variable definitions seamlessly.
+Manage Figma Variables (Collections, Modes, and Values) and local Styles.
 
-### Provision Token Libraries
+### Automated Palette Generation
 ```powershell
-# Base UI framework primitives
-node src/index.js tokens ds
-
 # Full 242-color Tailwind palette
 node src/index.js tokens tailwind
 
-# Predefined geometric spacing values
+# Predefined geometric spacing values (4px base)
 node src/index.js tokens spacing
 
 # Standardized border corner radii constraints
 node src/index.js tokens radii
+
+# Import W3C DTCG compliant tokens ($value, $type)
+node src/index.js tokens w3c import "path/to/tokens.json"
+
+# Import from a standard JSON file
+node src/index.js tokens import "colors.json" --collection {Colors}
+
+# Clear all local variables and collections
+node src/index.js tokens clear
 ```
 
 ### Manage Variable Collections
 ```powershell
-# Enumerate all accessible variables
+# Enumerate all accessible variables and collections
 node src/index.js var list
 
 # Enumerate all local styles (Text, Paint, Effect, Grid)
 node src/index.js style list
 
-# Search for a distinct variable format
-node src/index.js var find "primary/*"
+# Create a variable collection
+node src/index.js col create {Semantic Colors}
+
+# Rename or delete a collection
+node src/index.js col rename {ID_OR_NAME} {New Name}
+node src/index.js col delete {ID_OR_NAME}
 ```
 
+### Manage Individual Variables
+```powershell
 # Create a variable procedurally
-node src/index.js var create "primary/500" -c "CollectionId" -t COLOR -v "#3b82f6"
+node src/index.js var create {primary/500} {COLOR} {#3b82f6} --collection {CollectionID}
 
-# Create a new collection block
-node src/index.js col create "Semantic Colors"
+# Set a variable value for a specific mode
+node src/index.js var value {primary/500} {Dark Mode} {#1e3a8a}
+
+# Rename or delete a variable
+node src/index.js var rename {ID_OR_NAME} {new/name}
+node src/index.js var delete {ID_OR_NAME}
 ```
 
-### Bind Extracted Variables
+### Manage Variable Modes
+```powershell
+# Add a new mode to a collection
+node src/index.js mode add {Semantic Colors} {High Contrast}
+
+# Rename an existing mode
+node src/index.js mode edit {Semantic Colors} {Light} {Day Mode}
+
+# Batch generate a Dark mode from Light (Auto-inverts colors)
+node src/index.js mode multi {Semantic Colors} --from {Light} --to {Dark} --strategy {invert}
+```
+
+### Binding Variables
 Apply existing design tokens against specific structural elements.
 
 ```powershell
-node src/index.js bind fill "primary/500"
-node src/index.js bind gap "spacing/md"
-node src/index.js bind radius "radius/sm"
+node src/index.js bind fill {primary/500}
+node src/index.js bind gap {spacing/md}
+node src/index.js bind radius {radius/sm}
 
 # Apply specifically to targeted Layer IDs
-node src/index.js bind padding "spacing/lg" -n "ID1" "ID2"
+node src/index.js bind padding {spacing/lg} -n {ID1} {ID2}
 ```
 
 ---
 
-## 3. Element Creation & Layout
+## 3. Rendering & Generation
 
-Construct primitive vector shapes or deploy robust semantic AST templates directly on the canvas.
+Construct primitives or deploy robust semantic AST templates directly on the canvas.
 
-### Generate Simple Primitives
+### AI-Powered UI Synthesis
 ```powershell
-# Commands can be executed securely in PowerShell environments
-node src/index.js create rect "Card" -w 320 -h 200 --fill "#fff" --radius 12
-node src/index.js create text "Welcome" -s 24 -c "#000" -w bold
-node src/index.js create icon lucide:star -s 24 -c "#f59e0b"
-node src/index.js create image "https://example.com/placeholder.png" -w 400
-node src/index.js create autolayout "Stack" -d col -g 16 -p 24
+# Synthesize a high-fidelity Figma UI from a description
+node src/index.js generate {A modern login card with email and password fields}
 ```
 
 ### Render Expressive JSX
-Leverages the robust parser mapping declarative attributes to their native Figma API equivalents. Use multiple lines or save to a variable to avoid syntax errors inside PowerShell.
+Leverages the robust parser mapping declarative attributes to native Figma API equivalents.
+**Mandate:** Wrap all property values in `{}` and escape any `$` (e.g., `` `$ ``).
+
 ```powershell
-node src/index.js render "<Frame w={320} h={180} bg=\"#fff\" flex=\"col\" p={24}>
-  <Text size={20} weight=\"bold\" color=\"#222\">Success Alert</Text>
+node src/index.js render --code "<Frame w={320} h={180} bg={#ffffff} flex={col} p={24} rounded={12}>
+  <Text size={20} weight={bold} color={#222222} w={fill}>Success Alert</Text>
 </Frame>"
 ```
 
-### Iterative Multi-Frame Renders
+### Batch Rendering
 ```powershell
-node src/index.js render-batch '[
-  "<Frame name=\"First_Child\" w={300} h={200} bg=\"#fff\"><Text>1</Text></Frame>",
-  "<Frame name=\"Second_Child\" w={300} h={200} bg=\"#fff\"><Text>2</Text></Frame>"
-]' -d row -g 40
+node src/index.js render-batch "[
+  \"<Frame name={First_Child} w={300} h={200} bg={#fff}><Text>1</Text></Frame>\",
+  \"<Frame name={Second_Child} w={300} h={200} bg={#fff}><Text>2</Text></Frame>\"
+]"
+```
+
+### Advanced UI Automation
+```powershell
+# Inject JSON data into a component matching layer names starting with #
+node src/index.js hydrate {data.json} {Card_Component} --clone
+
+# Test layout responsiveness by generating clones at different breakpoints
+node src/index.js responsive {Dashboard} --breakpoints {375,768,1440}
+
+# Convert a UI component into a skeleton loading state
+node src/index.js skeleton {Profile_Card} --color {#e2e8f0}
 ```
 
 ---
@@ -120,166 +156,104 @@ Search, mutate, or organize existing document structures.
 node src/index.js canvas info
 
 # Retrieve properties (defaults to selection if no ID provided)
-node src/index.js get
-node src/index.js get "1:234"
+node src/index.js get {1:234}
 
 # Deep inspect and return JSX (defaults to selection)
-node src/index.js inspect
-node src/index.js inspect "1:234"
+node src/index.js inspect {1:234}
+
+# Find nodes by name
+node src/index.js find {Card}
 ```
 
 ### Mutation Operations
 ```powershell
 # Update an existing node (defaults to selection)
-node src/index.js update "<Frame bg=\"#000\" />"
-node src/index.js update "1:234" "<Frame bg=\"#000\" />"
-```
-
-### Geometric Modifications
-```powershell
-node src/index.js set fill "#3b82f6" -n "1:234"
-node src/index.js set autolayout row -g 8 -p 16 -n "1:234"
-node src/index.js set pos 100 100
-node src/index.js sizing hug
-node src/index.js align center
+node src/index.js update {1:234} "<Frame bg={#000000} />"
 ```
 
 ### Organizational Hygiene
 ```powershell
-# Grid arrangement
-node src/index.js arrange -g 100 -c 3
-
-node src/index.js node tree "1:234" -d 5
-node src/index.js node to-component "1:234"
-node src/index.js node delete "1:234"
+# Node operations: to-component, delete (defaults to selection)
+node src/index.js node to-component {1:234}
+node src/index.js node delete {1:234}
 ```
 
 ---
 
-## 5. Exports & Static Analysis
+## 5. Prototyping
 
-Generate assets, CSS mappings, and evaluate semantic design rules.
+Create interactive prototypes directly from the command line.
 
-### Exporters
 ```powershell
-# Pixel asset extraction
-node src/index.js export screenshot -o view.png
-node src/index.js raw export "1:234" --scale 2 --suffix "_dark"
+# Create a prototype interaction from a source node to a target node
+node src/index.js proto link {Button} {Target_Frame} --trigger {ON_CLICK} --transition {SMART_ANIMATE}
+```
 
-# Style extraction
-node src/index.js export css
-node src/index.js export tailwind
+---
 
-# Component JSX extraction
-node src/index.js export-jsx "1:234" -o ExportedCard.jsx --pretty
+## 6. Exports & Auditing
+
+Generate assets and evaluate semantic design rules.
+
+### Exporting
+```powershell
+# Export design system as zip with themes, tokens, and metadata
+node src/index.js export-zip -o {dist}
 ```
 
 ### Auditing
 ```powershell
-node src/index.js lint
-node src/index.js lint --fix
-node src/index.js analyze colors
-node src/index.js analyze spacing
+# Perform an autonomous accessibility audit for color contrast failures
+node src/index.js audit a11y --page
 ```
 
 ---
 
-## 6. FigJam Support
+## 7. FigJam Support
 
 FigJam implements a distinct subset of the Plugin API that demands separate abstractions.
 
 ```powershell
-# Find active boards
-node src/index.js fj list
+# List available FigJam pages
+node src/index.js fj pages
 
-# Interactively draw standard elements
-node src/index.js fj sticky "Meeting Note" -x 100 -y 100 --color "#FEF08A"
-node src/index.js fj shape "Process Step" -x 200 -y 100 -w 200 -h 100 --type DIAMOND
-node src/index.js fj text "Header" -x 100 -y 400 --size 32
-
-# Operations mapped strictly to the connected FigJam workspace
-node src/index.js fj connect "2:30" "2:34"
-node src/index.js fj move "2:30" 500 500
-node src/index.js fj update "2:30" "Re-written content"
-node src/index.js fj delete "2:30"
+# Create a sticky note
+node src/index.js fj sticky {Meeting Note} -x {100} -y {100} --color {#FEF08A}
 ```
-
-*Note: In FigJam, operations that define `text` inputs internally block on rendering cycles securely until internal fonts (`Inter`) are dynamically downloaded by the host system.*
 
 ---
 
-## 7. Advanced JavaScript Techniques
+## 8. Automated Design Workflow (Alfa)
 
-Deploy complex logic directly inside the Figma application by stringifying functions.
-
-### Switching Modes for Bound Library Variables
-This function traces local bound nodes safely back to external library definitions for Mode Swapping (e.g., Light to Dark).
-
-```javascript
-// file: switch-mode.js
-const nodeIds = ['1:92', '1:112'];
-
-function findModeCollection(n) {
-  if (n.boundVariables) {
-    for (const [prop, binding] of Object.entries(n.boundVariables)) {
-      const b = Array.isArray(binding) ? binding[0] : binding;
-      if (b && b.id) {
-        try {
-          const variable = figma.variables.getVariableById(b.id);
-          if (variable) {
-            const col = figma.variables.getVariableCollectionById(variable.variableCollectionId);
-            if (col && col.modes.length > 1) {
-              return { col, modes: col.modes };
-            }
-          }
-        } catch(e) {}
-      }
-    }
-  }
-  if (n.children) {
-    for (const c of n.children) {
-      const found = findModeCollection(c);
-      if (found) return found;
-    }
-  }
-  return null;
-}
-
-const targetNode = figma.getNodeById(nodeIds[0]);
-const found = findModeCollection(targetNode);
-
-if (found) {
-  const lightMode = found.modes.find(m => m.name.includes('Light'));
-  if (lightMode) {
-    nodeIds.forEach(id => {
-      const n = figma.getNodeById(id);
-      if (n) {
-        n.setExplicitVariableModeForCollection(found.col, lightMode.modeId);
-      }
-    });
-  }
-}
-```
+An end-to-end workflow to scaffold and configure design systems.
 
 ```powershell
-# Execute the logic script
-node src/index.js run switch-mode.js
+# Step 1: Scaffold a new project and research folder
+node src/index.js design start
+
+# Step 2: Define product architecture and screens
+node src/index.js design architecture
+
+# Step 3: Configure design system tokens (palette, roundness)
+node src/index.js design tokens
+
+# Check the status of the current workflow
+node src/index.js design status
 ```
 
-### Proportional Vector Sub-Tree Scaling
-Using native `.rescale()` retains corner and path relations. Calling `.resize()` improperly scales internal group constraints.
-```javascript
-// file: rescale.js
-const n = figma.getNodeById('1:223');
-n.rescale(1.5);
+---
 
-// Maintain explicit bounding coordinates after scale operations
-const frameW = 1920, frameH = 1080;
-n.x = (frameW - n.width) / 2;
-n.y = (frameH - n.height) / 2;
-```
+## 9. Advanced JavaScript Execution
 
+Deploy complex logic directly inside the Figma application using `eval` or `run`.
+
+### Execute Inline JavaScript
 ```powershell
-# Run the script via the CLI
-node src/index.js run rescale.js
+node src/index.js eval "figma.currentPage.selection[0].fills = [{ type: 'SOLID', color: { r: 1, g: 0, b: 0 } }]"
+```
+
+### Run Logic Scripts
+```powershell
+# Execute a JavaScript file directly in the Figma environment
+node src/index.js run path/to/script.js
 ```

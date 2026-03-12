@@ -288,7 +288,7 @@ class InspectCommand extends Command {
 
 class UpdateCommand extends Command {
   name = 'update [id] [jsx]';
-  description = 'Update an existing node by ID using JSX props (defaults to selection)';
+  description = 'Update an existing node and its children using JSX (defaults to selection)';
   needsConnection = true;
 
   async execute(ctx, options, id, jsx) {
@@ -320,13 +320,15 @@ class UpdateCommand extends Command {
          return;
       }
 
-      // We only take props from the root of the provided JSX
-      const props = commands[0].params.props;
       const { sendCommand } = await import('../transport/bridge.js');
-      const result = await sendCommand('node.update', { id: targetId, props });
+      const result = await sendCommand('node.update', { 
+        id: targetId, 
+        props: commands[0].params.props,
+        batch: commands // Send the whole command list for recursive updates
+      });
       
       if (result && result.data && result.data.status === 'updated') {
-         ctx.logSuccess(`Node ${targetId} updated successfully`);
+         ctx.logSuccess(`Node ${targetId} and children updated successfully`);
       } else {
          ctx.logError(`Update failed for node ${targetId}`);
       }
