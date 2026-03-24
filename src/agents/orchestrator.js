@@ -1,8 +1,12 @@
 /**
- * Orchestrator — The MoE Gating Network & Pipeline Coordinator.
+ * Orchestrator — The MoE 3-Phase Pipeline Coordinator.
  *
- * Decomposes user intent → scores experts → dispatches top-K →
- * aggregates results → logs to memory.
+ * Phase 1 (PRE):   TokenExpert, Visual, UXWriter — gather context
+ * Phase 2 (BUILD): Builder — produce JSX from context
+ * Phase 3 (POST):  Responsive, A11y, Guardian — validate & enhance
+ *
+ * Key fix: Pre-processors write to their own namespace in pipelineData.
+ * Only the Builder writes to jsx/commands. Post-processors validate.
  */
 
 import chalk from 'chalk';
@@ -90,8 +94,7 @@ export class Orchestrator {
       }))
       .filter(e => e.score >= this.minRelevance)
       .sort((a, b) => {
-        // Sort by score desc, then priority asc (lower = earlier)
-        if (b.score !== a.score) return b.score - a.score;
+        // Sort by priority (within same phase, lower priority runs first)
         return a.expert.priority - b.expert.priority;
       });
 
@@ -99,7 +102,7 @@ export class Orchestrator {
   }
 
   /**
-   * Execute the full MoE pipeline for a user intent.
+   * Execute the full MoE 3-phase pipeline.
    *
    * @param {import('../cli/context.js').CommandContext} ctx
    * @param {string} rawInput - User's natural language input
@@ -120,7 +123,6 @@ export class Orchestrator {
 
     if (selected.length === 0) {
       this._log('gate', 'No experts matched. Falling back to Builder.');
-      // Fallback to direct render
       return {
         success: false,
         error: 'No experts matched the intent',
@@ -128,44 +130,111 @@ export class Orchestrator {
       };
     }
 
-    this._log('gate', `Selected ${selected.length} experts: ${selected.map(s => `${s.expert.name}(${s.score.toFixed(2)})`).join(', ')}`);
+    // ── Separate by phase ──
+    const phases = { pre: [], build: [], post: [] };
+    for (const s of selected) {
+      const phase = s.expert.phase || 'pre';
+      if (phases[phase]) {
+        phases[phase].push(s);
+      } else {
+        phases.pre.push(s); // fallback
+      }
+    }
 
-    // 3. Execute pipeline — sequential, output chains
-    const results = {};
+    this._log('gate', `Selected ${selected.length} experts — Pre: ${phases.pre.map(s => s.expert.name).join(', ') || 'none'} | Build: ${phases.build.map(s => s.expert.name).join(', ') || 'none'} | Post: ${phases.post.map(s => s.expert.name).join(', ') || 'none'}`);
+
     let pipelineData = { intent, commands: [], jsx: '' };
+    const results = {};
     let overallSuccess = true;
 
-    for (const { expert, score } of selected) {
-      const task = {
-        id: `${expert.name}-${Date.now()}`,
-        type: intent.action,
-        description: intent.raw,
-        input: pipelineData,
-        dependencies: [],
-      };
+    const task = {
+      id: `pipeline-${Date.now()}`,
+      type: intent.action,
+      description: intent.raw,
+      input: { intent },
+      dependencies: [],
+    };
 
+    // ── Phase 1: PRE-PROCESSORS (gather context) ──
+    // Pre-processors add to their own namespaces. They CANNOT write jsx or commands.
+    for (const { expert, score } of phases.pre) {
       try {
-        this._log('execute', `→ ${expert.name} (score: ${score.toFixed(2)})`);
+        this._log('execute', `[PRE] → ${expert.name} (${score.toFixed(2)})`);
+        if (expert.name === 'token-expert') {
+           pipelineData.tokens = expert.getDefaultTokenSet();
+        }
         const result = await expert.execute(ctx, task, pipelineData);
         results[expert.name] = result;
 
-        // Chain outputs
         if (result.data) {
-          if (result.data.commands) pipelineData.commands = result.data.commands;
+          for (const [key, value] of Object.entries(result.data)) {
+            // Pre-processors must NOT overwrite jsx or commands
+            if (key !== 'jsx' && key !== 'commands') {
+              pipelineData[key] = value;
+            }
+          }
+        }
+
+        if (result.warnings && result.warnings.length > 0) {
+          this._log('warning', `${expert.name}: ${result.warnings.join('; ')}`);
+        }
+      } catch (err) {
+        this._log('error', `${expert.name} threw: ${err.message}`);
+        results[expert.name] = { success: false, errors: [err.message] };
+      }
+    }
+
+    // ── Phase 2: BUILDER (produce JSX + commands) ──
+    // Only the Builder writes to jsx and commands.
+    for (const { expert, score } of phases.build) {
+      try {
+        this._log('execute', `[BUILD] → ${expert.name} (${score.toFixed(2)})`);
+        const result = await expert.execute(ctx, task, pipelineData);
+        results[expert.name] = result;
+
+        if (result.data) {
           if (result.data.jsx) pipelineData.jsx = result.data.jsx;
-          if (result.data.tokens) pipelineData.tokens = result.data.tokens;
-          // Spread any extra data
-          pipelineData = { ...pipelineData, ...result.data };
+          if (result.data.commands) pipelineData.commands = result.data.commands;
+          // Also merge other data (templateUsed, etc.)
+          for (const [key, value] of Object.entries(result.data)) {
+            if (key !== 'jsx' && key !== 'commands') {
+              pipelineData[key] = value;
+            }
+          }
+        }
+
+        if (!result.success) {
+          this._log('error', `${expert.name} failed: ${(result.errors || []).join('; ')}`);
+          overallSuccess = false;
+        }
+      } catch (err) {
+        this._log('error', `${expert.name} threw: ${err.message}`);
+        results[expert.name] = { success: false, errors: [err.message] };
+        overallSuccess = false;
+      }
+    }
+
+    // ── Phase 3: POST-PROCESSORS (validate & enhance) ──
+    // Post-processors can read jsx/commands but write to their own namespaces.
+    for (const { expert, score } of phases.post) {
+      try {
+        this._log('execute', `[POST] → ${expert.name} (${score.toFixed(2)})`);
+        const result = await expert.execute(ctx, task, pipelineData);
+        results[expert.name] = result;
+
+        if (result.data) {
+          for (const [key, value] of Object.entries(result.data)) {
+            pipelineData[key] = value;
+          }
         }
 
         if (result.warnings && result.warnings.length > 0) {
           this._log('warning', `${expert.name}: ${result.warnings.join('; ')}`);
         }
 
-        if (!result.success) {
+        if (!result.success && expert.name === 'guardian') {
+          // Guardian failure is critical
           this._log('error', `${expert.name} failed: ${(result.errors || []).join('; ')}`);
-          // Don't break — let Guardian-type agents still run
-          if (expert.name === 'builder') overallSuccess = false;
         }
       } catch (err) {
         this._log('error', `${expert.name} threw: ${err.message}`);
@@ -178,7 +247,7 @@ export class Orchestrator {
       try {
         await this.memory.recordExecution({
           intent,
-          selected: selected.map(s => ({ name: s.expert.name, score: s.score })),
+          selected: selected.map(s => ({ name: s.expert.name, score: s.score, phase: s.expert.phase })),
           results,
           duration: Date.now() - startTime,
         });
@@ -201,7 +270,7 @@ export class Orchestrator {
    * Print pipeline trace to console (verbose mode).
    */
   printTrace() {
-    console.log(chalk.gray('\n── MoE Pipeline Trace ──'));
+    console.log(chalk.gray('\n── MoE 3-Phase Pipeline Trace ──'));
     for (const entry of this.trace) {
       const icon = {
         intent: '🧠',
@@ -223,7 +292,7 @@ export class Orchestrator {
 
       console.log(color(`  ${icon} [${entry.type}] ${entry.message}`));
     }
-    console.log(chalk.gray('────────────────────────\n'));
+    console.log(chalk.gray('────────────────────────────────\n'));
   }
 
   /** @private */

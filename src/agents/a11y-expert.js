@@ -50,6 +50,7 @@ export class A11yExpert extends Expert {
   description = 'Accessibility validation — WCAG 2.2 contrast, touch targets, semantic structure.';
   capabilities = ['validation', 'accessibility'];
   priority = 85; // Runs near-last, after guardian
+  phase = 'post';
 
   relevance(intent) {
     if (intent.action === 'accessibility') return 0.95;

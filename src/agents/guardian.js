@@ -23,14 +23,23 @@ const RULES = {
     id: 'NO_RAW_COLORS',
     severity: 'warning',
     message: 'Raw hex color detected. Prefer design token references.',
-    check(cmd) {
+    check(cmd, context = {}) {
       const props = cmd.params?.props || {};
       const violations = [];
       const colorProps = ['fill', 'stroke'];
+      const semanticTokens = context.tokens?.semantic || {};
+      
       for (const prop of colorProps) {
         const val = props[prop];
         if (typeof val === 'string' && val.startsWith('#') && !KNOWN_TOKEN_PREFIXES.some(p => val.startsWith(p))) {
-          violations.push({ prop, value: val });
+          // Check if this raw hex is actually a resolved token value
+          const tokenSet = context.tokens?.semantic || {};
+          const isResolvedToken = Object.values(tokenSet).some(
+            t => t && t.value && t.value.trim().toLowerCase() === val.trim().toLowerCase()
+          );
+          if (!isResolvedToken) {
+            violations.push({ prop, value: val });
+          }
         }
       }
       return violations;
@@ -47,11 +56,13 @@ const RULES = {
         const w = props.width;
         const h = props.height;
         const violations = [];
-        if (w === undefined || w === 'fill' || w === 'hug') {
-          violations.push({ prop: 'width', value: w || 'undefined' });
+        // Only error on completely undefined width/height for root frames.
+        // allow 'hug' or 'fill' because standalone components might use it.
+        if (w === undefined) {
+          violations.push({ prop: 'width', value: 'undefined' });
         }
-        if (h === undefined || h === 'fill' || h === 'hug') {
-          violations.push({ prop: 'height', value: h || 'undefined' });
+        if (h === undefined) {
+          violations.push({ prop: 'height', value: 'undefined' });
         }
         return violations;
       }
@@ -134,6 +145,7 @@ export class GuardianExpert extends Expert {
   description = 'Pre-render validation middleware. Validates command batches against design system rules.';
   capabilities = ['validation', 'consistency', 'quality'];
   priority = 90; // Runs near-last (before a11y)
+  phase = 'post';
 
   relevance(intent) {
     // Always relevant for render/generate tasks
@@ -145,9 +157,10 @@ export class GuardianExpert extends Expert {
   /**
    * Validate a command batch against all rules.
    * @param {Object[]} commands - Parsed command batch
+   * @param {Object} context - Pipeline context data (tokens, etc.)
    * @returns {ValidationReport}
    */
-  validate(commands) {
+  validate(commands, context = {}) {
     const report = {
       pass: true,
       totalCommands: commands.length,
@@ -158,7 +171,7 @@ export class GuardianExpert extends Expert {
     for (let i = 0; i < commands.length; i++) {
       const cmd = commands[i];
       for (const rule of Object.values(RULES)) {
-        const issues = rule.check(cmd);
+        const issues = rule.check(cmd, context);
         if (issues.length > 0) {
           for (const issue of issues) {
             report.violations.push({
@@ -194,7 +207,7 @@ export class GuardianExpert extends Expert {
       };
     }
 
-    const report = this.validate(commands);
+    const report = this.validate(commands, pipelineData);
 
     return {
       success: report.pass,

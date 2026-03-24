@@ -1,109 +1,51 @@
 /**
- * Builder Expert — Component generation engine.
+ * Builder Expert — Composable template engine.
  *
- * Takes high-level descriptions and produces render-ready JSX
- * using component templates from the pattern library.
+ * Phase: BUILD
+ * Consumes pre-processor context (tokens, icons, copy) and produces
+ * render-ready JSX by matching components from descriptions and
+ * composing them via layout primitives.
  */
 
 import { Expert } from './expert.js';
+import {
+  buttons, matchButtonVariant,
+  cards, matchCardType,
+  inputs, form, matchInputType,
+  navigation,
+  dataDisplay, table,
+  feedback,
+  grid, stack, split, centered, dashboard, inferLayout,
+} from './primitives/index.js';
 
-// ── Component Template Library ───────────────────────
+// ── Component Pattern Matching ───────────────────────
 
-const TEMPLATES = {
-
-  'button/primary': (label = 'Button', opts = {}) => {
-    const w = opts.w || 'hug';
-    return `<Frame name={Button_Primary} w={${w}} h={48} bg={#3b82f6} rounded={12} px={24} py={12} justify={center} items={center}>
-  <Text size={16} weight={semibold} color={#ffffff}>${label}</Text>
-</Frame>`;
-  },
-
-  'button/secondary': (label = 'Button', opts = {}) => {
-    const w = opts.w || 'hug';
-    return `<Frame name={Button_Secondary} w={${w}} h={48} bg={#f1f5f9} rounded={12} px={24} py={12} justify={center} items={center} stroke={#e2e8f0}>
-  <Text size={16} weight={semibold} color={#1e293b}>${label}</Text>
-</Frame>`;
-  },
-
-  'button/ghost': (label = 'Button', opts = {}) => {
-    const w = opts.w || 'hug';
-    return `<Frame name={Button_Ghost} w={${w}} h={48} rounded={12} px={24} py={12} justify={center} items={center}>
-  <Text size={16} weight={semibold} color={#3b82f6}>${label}</Text>
-</Frame>`;
-  },
-
-  'button/destructive': (label = 'Delete', opts = {}) => {
-    const w = opts.w || 'hug';
-    return `<Frame name={Button_Destructive} w={${w}} h={48} bg={#ef4444} rounded={12} px={24} py={12} justify={center} items={center}>
-  <Text size={16} weight={semibold} color={#ffffff}>${label}</Text>
-</Frame>`;
-  },
-
-  'input/text': (placeholder = 'Enter text...', opts = {}) => {
-    const label = opts.label || 'Label';
-    return `<Frame name={Input_Text} w={fill} h={hug} flex={col} gap={6}>
-  <Text size={13} weight={medium} color={#374151}>${label}</Text>
-  <Frame w={fill} h={44} bg={#ffffff} rounded={8} px={14} py={12} stroke={#d1d5db} items={center}>
-    <Text size={14} color={#9ca3af} w={fill}>${placeholder}</Text>
-  </Frame>
-</Frame>`;
-  },
-
-  'card/basic': (title = 'Card Title', description = 'Description text goes here.', opts = {}) => {
-    const w = opts.w || 360;
-    return `<Frame name={Card} w={${w}} h={hug} bg={#ffffff} flex={col} p={24} gap={16} rounded={16} shadow={0 4 16 rgba(0,0,0,0.06)} stroke={#f1f5f9}>
-  <Text size={18} weight={semibold} color={#111827} w={fill}>${title}</Text>
-  <Text size={14} color={#6b7280} w={fill}>${description}</Text>
-</Frame>`;
-  },
-
-  'card/stat': (label = 'Total Revenue', value = '12,500', trend = '+12%', opts = {}) => {
-    const w = opts.w || 280;
-    return `<Frame name={StatCard} w={${w}} h={hug} bg={#ffffff} flex={col} p={24} gap={12} rounded={16} shadow={0 2 8 rgba(0,0,0,0.04)} stroke={#f1f5f9}>
-  <Text size={13} weight={medium} color={#6b7280} w={fill}>${label}</Text>
-  <Frame flex={row} items={center} gap={8} w={fill} h={hug}>
-    <Text size={28} weight={bold} color={#111827}>${value}</Text>
-    <Frame bg={#ecfdf5} rounded={6} px={8} py={4}>
-      <Text size={12} weight={semibold} color={#059669}>${trend}</Text>
-    </Frame>
-  </Frame>
-</Frame>`;
-  },
-
-  'badge/status': (text = 'Active', color = '#22c55e', opts = {}) => {
-    return `<Frame name={Badge_${text}} h={24} bg={${color}15} rounded={6} px={10} py={4} items={center}>
-  <Text size={12} weight={semibold} color={${color}}>${text}</Text>
-</Frame>`;
-  },
-
-  'nav/sidebar': (items = ['Dashboard', 'Analytics', 'Users', 'Settings'], opts = {}) => {
-    const w = opts.w || 240;
-    const navItems = items.map((item, i) => {
-      const isActive = i === 0;
-      const bg = isActive ? 'bg={#eff6ff}' : '';
-      const color = isActive ? '#1d4ed8' : '#6b7280';
-      const weight = isActive ? 'semibold' : 'regular';
-      return `  <Frame name={NavItem_${item}} w={fill} h={44} ${bg} rounded={8} px={16} items={center}>
-    <Text size={14} weight={${weight}} color={${color}} w={fill}>${item}</Text>
-  </Frame>`;
-    }).join('\n');
-
-    return `<Frame name={Sidebar} w={${w}} h={fill} bg={#ffffff} flex={col} p={16} gap={4} stroke={#f1f5f9}>
-  <Frame name={Logo_Area} w={fill} h={48} px={16} items={center}>
-    <Text size={20} weight={bold} color={#111827}>AppName</Text>
-  </Frame>
-  <Frame name={Nav_Items} w={fill} h={hug} flex={col} gap={4}>
-${navItems}
-  </Frame>
-</Frame>`;
-  },
-};
+const COMPONENT_PATTERNS = [
+  { type: 'sidebar',     match: /\b(sidebar|side\s*nav|drawer|left\s*panel)s?\b/i, category: 'navigation' },
+  { type: 'header',      match: /\b(header|topbar|app\s*bar|toolbar|banner|top\s*bar)s?\b/i, category: 'navigation' },
+  { type: 'tab-bar',     match: /\b(tab\s*bar|tabs|tab\s*nav)s?\b/i, category: 'navigation' },
+  { type: 'button',      match: /\b(button|btn|cta|submit|action)s?\b/i, category: 'button' },
+  { type: 'stat_card',   match: /\b(stat\s*card|metric\s*card|kpi|statistic)s?\b/i, category: 'card' },
+  { type: 'pricing',     match: /\b(pricing|plan|tier|subscription|price)s?\b/i, category: 'card' },
+  { type: 'card',        match: /\b(card|tile|panel)s?\b/i, category: 'card' },
+  { type: 'input',       match: /\b(input|field|text\s*field|search\s*bar)\b/i, category: 'input' },
+  { type: 'form',        match: /\b(form|login|signup|register|sign\s*in|sign\s*up|contact)\b/i, category: 'form' },
+  { type: 'badge',       match: /\b(badge|tag|label|chip|status)\b/i, category: 'data' },
+  { type: 'avatar',      match: /\b(avatar|profile\s*(pic|image|photo)|user\s*icon)\b/i, category: 'data' },
+  { type: 'table',       match: /\b(table|data\s*table|grid\s*view|spreadsheet)\b/i, category: 'data' },
+  { type: 'list',        match: /\b(list|list\s*items?|menu\s*items?)\b/i, category: 'data' },
+  { type: 'modal',       match: /\b(modal|dialog|popup|overlay|confirm)\b/i, category: 'feedback' },
+  { type: 'alert',       match: /\b(alert|notice|banner\s*message|warning\s*box)\b/i, category: 'feedback' },
+  { type: 'toast',       match: /\b(toast|snackbar|notification)\b/i, category: 'feedback' },
+  { type: 'divider',     match: /\b(divider|separator|hr|line)\b/i, category: 'data' },
+];
 
 export class BuilderExpert extends Expert {
   name = 'builder';
-  description = 'Component generation engine. Produces render-ready JSX from descriptions and templates.';
+  description = 'Composable template engine. Matches components from descriptions and composes them via layout primitives.';
   capabilities = ['component', 'layout', 'generation'];
-  priority = 30; // After token-expert, before guardian
+  priority = 30;
+  phase = 'build';
 
   relevance(intent) {
     if (['generate', 'render'].includes(intent.action)) return 0.95;
@@ -117,102 +59,333 @@ export class BuilderExpert extends Expert {
    * @returns {string[]}
    */
   listTemplates() {
-    return Object.keys(TEMPLATES);
-  }
-
-  /**
-   * Get a specific template.
-   * @param {string} name
-   * @returns {Function|null}
-   */
-  getTemplate(name) {
-    return TEMPLATES[name] || null;
-  }
-
-  /**
-   * Build JSX from a component description using template matching.
-   * @param {string} description
-   * @param {Object} context
-   * @returns {{ jsx: string, templateUsed: string|null }}
-   */
-  buildFromDescription(description, context = {}) {
-    const lower = description.toLowerCase();
-
-    // Match description to template
-    if (lower.includes('button')) {
-      const variant = lower.includes('secondary') ? 'secondary'
-        : lower.includes('ghost') ? 'ghost'
-        : lower.includes('destructive') || lower.includes('delete') ? 'destructive'
-        : 'primary';
-      // Extract label if quoted
-      const labelMatch = description.match(/["']([^"']+)["']/);
-      const label = labelMatch ? labelMatch[1] : this._extractLabel(description);
-      return { jsx: TEMPLATES[`button/${variant}`](label, context), templateUsed: `button/${variant}` };
-    }
-
-    if (lower.includes('stat') && lower.includes('card')) {
-      const valueMatch = description.match(/[\$]?([\d,]+)/);
-      const value = valueMatch ? valueMatch[1] : '0';
-      const trendMatch = description.match(/([+-]?\d+%)/);
-      const trend = trendMatch ? trendMatch[1] : '+0%';
-      const label = this._extractStatLabel(description);
-      return { jsx: TEMPLATES['card/stat'](label, value, trend, context), templateUsed: 'card/stat' };
-    }
-
-    if (lower.includes('card')) {
-      const title = this._extractLabel(description);
-      return { jsx: TEMPLATES['card/basic'](title, 'Description text goes here.', context), templateUsed: 'card/basic' };
-    }
-
-    if (lower.includes('input') || lower.includes('field') || lower.includes('text field')) {
-      const label = this._extractLabel(description);
-      return { jsx: TEMPLATES['input/text']('Enter text...', { label, ...context }), templateUsed: 'input/text' };
-    }
-
-    if (lower.includes('sidebar') || lower.includes('navigation')) {
-      return { jsx: TEMPLATES['nav/sidebar'](['Dashboard', 'Analytics', 'Users', 'Settings'], context), templateUsed: 'nav/sidebar' };
-    }
-
-    if (lower.includes('badge')) {
-      const label = this._extractLabel(description) || 'Active';
-      return { jsx: TEMPLATES['badge/status'](label, '#22c55e', context), templateUsed: 'badge/status' };
-    }
-
-    // Fallback — generic frame with title
-    const fallbackJsx = `<Frame name={Generated_Component} w={400} h={hug} bg={#ffffff} flex={col} p={24} gap={16} rounded={16} shadow={0 4 12 rgba(0,0,0,0.05)} stroke={#f1f5f9}>
-  <Text size={20} weight={bold} color={#111827} w={fill}>${description}</Text>
-  <Text size={14} color={#6b7280} w={fill}>Auto-generated component</Text>
-</Frame>`;
-
-    return { jsx: fallbackJsx, templateUsed: null };
-  }
-
-  /** @private */
-  _extractLabel(description) {
-    const quoted = description.match(/["']([^"']+)["']/);
-    if (quoted) return quoted[1];
-    // Use first 2-3 significant words
-    const words = description.split(/\s+/)
-      .filter(w => !['a', 'an', 'the', 'with', 'for', 'and', 'or', 'create', 'make', 'add', 'build', 'generate'].includes(w.toLowerCase()));
-    return words.slice(0, 3).join(' ') || 'Component';
-  }
-
-  /** @private */
-  _extractStatLabel(description) {
-    const labelPatterns = [
-      /showing\s+(.+?)(?:\s+with|\s+at|$)/i,
-      /for\s+(.+?)(?:\s+with|\s+at|$)/i,
+    return [
+      ...Object.keys(buttons).map(k => `button/${k}`),
+      ...Object.keys(cards).map(k => `card/${k}`),
+      ...Object.keys(inputs).map(k => `input/${k}`),
+      ...Object.keys(navigation).map(k => `nav/${k}`),
+      ...Object.keys(dataDisplay).map(k => `data/${k}`),
+      ...Object.keys(feedback).map(k => `feedback/${k}`),
     ];
-    for (const pattern of labelPatterns) {
-      const match = description.match(pattern);
-      if (match) return match[1].replace(/[\$\d,]+/g, '').trim();
+  }
+
+  /**
+   * Match components from a natural language description.
+   * Returns an array of matched component specs.
+   * @param {string} description
+   * @returns {Array<{ type: string, category: string, count: number, variant?: string }>}
+   */
+  matchComponents(description) {
+    let lower = description.toLowerCase();
+    const matched = [];
+
+    for (const pattern of COMPONENT_PATTERNS) {
+      const matchRegex = new RegExp(`(?:\\b(\\d+)\\s+)?${pattern.match.source}`, 'i');
+      const m = lower.match(matchRegex);
+      
+      if (m) {
+        const count = m[1] ? parseInt(m[1], 10) : 1;
+
+        // Detect variant
+        let variant = null;
+        if (pattern.category === 'button') variant = matchButtonVariant(description);
+        if (pattern.category === 'card' && pattern.type === 'card') variant = matchCardType(description);
+        if (pattern.category === 'input') variant = matchInputType(description);
+
+        matched.push({ type: pattern.type, category: pattern.category, count, variant });
+        
+        // Remove the matched portion to prevent greedy double-matches
+        // e.g., 'stat card' -> don't match 'card' again later
+        lower = lower.replace(m[0], '');
+      }
     }
-    return 'Metric';
+
+    // If nothing matched, default to a basic card
+    if (matched.length === 0) {
+      matched.push({ type: 'card', category: 'card', count: 1, variant: 'basic' });
+    }
+
+    return matched;
+  }
+
+  /**
+   * Render a single primitive component.
+   * @param {{ type: string, category: string, variant?: string }} match
+   * @param {Object} context - Pipeline context (tokens, icons, copy, mode)
+   * @param {number} index - Index for multi-instance generation
+   * @returns {string} JSX
+   */
+  renderPrimitive(match, context = {}, index = 0) {
+    const { mode = 'Light', copy = {}, icons = {}, tokens } = context;
+    const opts = { mode, tokens };
+
+    switch (match.type) {
+      case 'button':
+        return buttons[match.variant || 'primary']({
+          label: copy.cta || copy.labels?.[index] || 'Button',
+          ...opts,
+        });
+
+      case 'card':
+        return cards[match.variant || 'basic']({
+          title: copy.title || copy.labels?.[index] || 'Card Title',
+          description: copy.description || 'Description text goes here.',
+          ...opts,
+        });
+
+      case 'pricing': {
+        const tierNames = copy.labels || ['Basic', 'Pro', 'Enterprise'];
+        const prices = copy.prices || ['\\`$9', '\\`$29', 'Custom'];
+        const name = tierNames[index] || `Tier ${index + 1}`;
+        const price = prices[index] || '\\`$0';
+        return cards.pricing({
+          name,
+          price,
+          primary: index === 1,
+          features: copy.features?.[index] || ['Feature 1', 'Feature 2', 'Feature 3'],
+          ...opts,
+        });
+      }
+
+      case 'input':
+        return inputs[match.variant || 'text']({
+          label: copy.labels?.[index] || 'Field',
+          ...opts,
+        });
+
+      case 'form': {
+        const formFields = copy.fields || [
+          { label: 'Email', placeholder: 'Enter email...' },
+          { label: 'Password', placeholder: 'Enter password...' },
+        ];
+        return form(formFields, {
+          title: copy.title || this._inferFormTitle(context.description || ''),
+          submitLabel: copy.cta || 'Submit',
+          ...opts,
+        });
+      }
+
+      case 'sidebar':
+        return navigation.sidebar({
+          items: copy.navItems || ['Dashboard', 'Analytics', 'Users', 'Settings'],
+          title: copy.appName || 'AppName',
+          ...opts,
+        });
+
+      case 'header':
+        return navigation.header({
+          title: copy.title || copy.pageTitle || 'Dashboard',
+          ...opts,
+        });
+
+      case 'tab-bar':
+        return navigation.tabBar({
+          tabs: copy.tabs || ['All', 'Active', 'Archived'],
+          ...opts,
+        });
+
+      case 'badge':
+        return dataDisplay.badge({
+          text: copy.labels?.[index] || 'Active',
+          ...opts,
+        });
+
+      case 'avatar':
+        return dataDisplay.avatar({
+          name: copy.labels?.[index] || 'JD',
+          ...opts,
+        });
+
+      case 'table':
+        return table(
+          copy.headers || ['Name', 'Status', 'Date'],
+          copy.rows || [['John Doe', 'Active', '2024-01-15'], ['Jane Smith', 'Pending', '2024-01-16']],
+          opts,
+        );
+
+      case 'list': {
+        const items = copy.labels || ['Item 1', 'Item 2', 'Item 3'];
+        return items.map(item =>
+          dataDisplay.listItem({ title: item, ...opts })
+        ).join('\n');
+      }
+
+      case 'modal':
+        return feedback.modal({
+          title: copy.title || 'Confirm Action',
+          description: copy.description || 'Are you sure?',
+          ...opts,
+        });
+
+      case 'alert':
+        return feedback.alert({
+          title: copy.title || 'Alert',
+          message: copy.description || 'Something happened.',
+          type: copy.severity || 'info',
+          ...opts,
+        });
+
+      case 'toast':
+        return feedback.toast({
+          message: copy.description || 'Changes saved.',
+          ...opts,
+        });
+
+      case 'divider':
+        return dataDisplay.divider(opts);
+
+      case 'stat_card':
+        return cards.stat({
+          title: copy.title || 'Stat Title',
+          value: '100',
+          trend: '+5%',
+          ...opts,
+        });
+
+      case 'pricing':
+        return cards.pricing({
+          tier: copy.title || 'Basic',
+          price: '$9',
+          features: copy.labels || ['Feature 1', 'Feature 2', 'Feature 3'],
+          ...opts,
+        });
+
+      default:
+        return cards.basic({
+          title: copy.title || match.type,
+          description: copy.description || `Auto-generated ${match.type}`,
+          ...opts,
+        });
+    }
+  }
+
+  buildFromDescription(description, context = {}) {
+    const matched = this.matchComponents(description);
+    const layoutInfo = inferLayout(description, this._totalCount(matched));
+
+    console.log('[DEBUG] matched components:', JSON.stringify(matched, null, 2));
+
+    // Expand matched components into individual JSX elements.
+    // However, if the layout naturally provides certain scaffolds (like dashboard provides sidebar/header),
+    // we don't need to treat them as independent elements in the main content flow.
+    const elements = [];
+    for (const m of matched) {
+      const isLayoutScaffold = ['dashboard', 'split'].includes(layoutInfo.type) && ['sidebar', 'header'].includes(m.type);
+      
+      if (!isLayoutScaffold) {
+        for (let i = 0; i < m.count; i++) {
+          elements.push(this.renderPrimitive(m, { ...context, description }, i));
+        }
+      }
+    }
+
+    console.log(`[DEBUG] builder elements generated: ${elements.length}`);
+
+    // Apply layout
+    const jsx = this._applyLayout(layoutInfo, matched, elements, context);
+    return { jsx, templateUsed: layoutInfo.type };
+  }
+
+  /** @private */
+  _applyLayout(layoutInfo, matched, elements, context) {
+    const { mode = 'Light', tokens } = context;
+    const opts = { mode, tokens };
+
+    switch (layoutInfo.type) {
+      case 'dashboard': {
+        // Dashboard: sidebar + header + content
+        const sidebarMatch = matched.find(m => m.type === 'sidebar');
+        const headerMatch = matched.find(m => m.type === 'header');
+
+        const sidebarJsx = sidebarMatch
+          ? this.renderPrimitive(sidebarMatch, context)
+          : navigation.sidebar(opts);
+        const headerJsx = headerMatch
+          ? this.renderPrimitive(headerMatch, context)
+          : navigation.header(opts);
+          
+        let contentJsx = cards.stat(opts);
+        if (elements.length > 0) {
+          contentJsx = elements.length > 1 
+            ? grid(elements, Math.min(elements.length, 4), { ...opts, bg: 'transparent', p: 0 }) 
+            : elements[0];
+        }
+
+        return dashboard(sidebarJsx, headerJsx, contentJsx, opts);
+      }
+
+      case 'split': {
+        const sidebarMatch = matched.find(m => m.type === 'sidebar');
+        const sidebarJsx = sidebarMatch
+          ? this.renderPrimitive(sidebarMatch, context)
+          : navigation.sidebar(opts);
+
+        let rightJsx = cards.basic(opts);
+        if (elements.length > 0) {
+          rightJsx = elements.length > 1 
+            ? grid(elements, Math.min(elements.length, 3), { ...opts, bg: 'transparent', p: 0 }) 
+            : elements[0];
+        }
+
+        return split(sidebarJsx, rightJsx, opts);
+      }
+
+      case 'grid':
+        return grid(elements, layoutInfo.columns || 3, opts);
+
+      case 'stack-h':
+        return stack(elements, 'row', opts);
+
+      case 'stack-v':
+        return stack(elements, 'col', opts);
+
+      case 'centered':
+        return centered(elements.join('\n'), opts);
+
+      case 'single':
+      default:
+        return elements.length === 1 ? elements[0] : stack(elements, 'col', opts);
+    }
+  }
+
+  /** @private */
+  _totalCount(matched) {
+    return matched.reduce((sum, m) => sum + m.count, 0);
+  }
+
+  /** @private — find which match object corresponds to the flat element index */
+  _findMatchForIndex(matched, flatIndex) {
+    let idx = 0;
+    for (const m of matched) {
+      if (flatIndex < idx + m.count) return m;
+      idx += m.count;
+    }
+    return null;
+  }
+
+  /** @private */
+  _inferFormTitle(description) {
+    const lower = description.toLowerCase();
+    if (lower.includes('login') || lower.includes('sign in')) return 'Sign In';
+    if (lower.includes('signup') || lower.includes('sign up') || lower.includes('register')) return 'Create Account';
+    if (lower.includes('contact')) return 'Contact Us';
+    if (lower.includes('feedback')) return 'Feedback';
+    return 'Form';
   }
 
   async execute(ctx, task, pipelineData = {}) {
     const description = task.description || task.input?.intent?.raw || '';
-    const { jsx, templateUsed } = this.buildFromDescription(description);
+
+    // ── Consume pre-processor context ──
+    const context = {
+      mode: pipelineData.intent?.params?.mode || 'Light',
+      tokens: pipelineData.tokens || {},
+      icons: pipelineData.icons || {},
+      copy: pipelineData.copy || {},
+      description,
+    };
+
+    const { jsx, templateUsed } = this.buildFromDescription(description, context);
 
     // Parse JSX to commands
     let commands = [];

@@ -15,6 +15,9 @@ export class Expert {
   /** @type {string} Human-readable role description */
   description = '';
 
+  /** @type {string} Pipeline phase ('pre', 'build', 'post') */
+  phase = 'pre';
+
   /**
    * Capability tags used by the Orchestrator's gating network
    * to match intents to experts.
@@ -28,6 +31,15 @@ export class Expert {
    * @type {number}
    */
   priority = 50;
+
+  /**
+   * Pipeline phase — determines WHEN this expert runs:
+   *  - 'pre'   → Phase 1: Gather context (tokens, icons, copy) for Builder
+   *  - 'build' → Phase 2: Produce JSX and commands
+   *  - 'post'  → Phase 3: Validate and enhance the output
+   * @type {'pre'|'build'|'post'}
+   */
+  phase = 'pre';
 
   /**
    * Compute relevance weight for a given intent.

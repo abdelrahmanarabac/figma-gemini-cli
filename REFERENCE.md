@@ -1,330 +1,296 @@
-# Command Reference: figma-gemini-cli
+# Command Reference — figma-gemini-cli (MoE Design Agent)
 
-The `figma-gemini-cli` provides a comprehensive suite of commands for manipulating the Figma workspace, managing design tokens, automating design workflows, and an intelligent **Mix-of-Experts (MoE) agent pipeline** for AI-powered design generation.
+> Every command funnels through the **Mix-of-Experts pipeline**. Experts are scored, dispatched, and their outputs chained before anything hits the Figma canvas.
 
 ---
 
-## 1. Setup & Connection
+## 1. Connection & Status
 
-Establish an authenticated bridge to the native Figma application.
+| Command | Description |
+|---|---|
+| `connect` | Start the Figma bridge (daemon + plugin WebSocket relay) |
+| `connect --safe` | Manual plugin-based connection (no CDP) |
+| `status` | Verify bridge health (daemon alive, plugin connected) |
 
-### Start the Proxy
 ```powershell
-# Autonomously configures CDP routing (Requires Full Disk Access on MacOS)
-node src/index.js connect
-
-# Bridge via the manual Figma Plugin interface
-node src/index.js connect --safe
-```
-
-### Validate and Diagnose
-```powershell
-node src/index.js status
+node src/index.js connect        # auto CDP routing
+node src/index.js connect --safe # manual plugin mode
+node src/index.js status         # check connection
 ```
 
 ---
 
-## 2. Variables & Design Tokens
+## 2. MoE Generation Pipeline
 
-Manage Figma Variables (Collections, Modes, and Values) and local Styles.
+### `generate <description>` — AI-Powered UI Synthesis
+Routes through **all 8 experts**: Orchestrator parses intent → TokenExpert ensures tokens → Builder selects template → UXWriter provides copy → Visual matches icons → Guardian validates → A11y checks contrast → Responsive analyzes breakpoints.
 
-### Automated Palette Generation
+| Flag | Effect |
+|---|---|
+| `--verbose` / `-v` | Print full pipeline trace (expert scores, decisions, timing) |
+| `--dry-run` | Execute pipeline without rendering to Figma |
+| `--mode <mode>` | Theme mode: `Light` or `Dark` (default: Light) |
+
 ```powershell
-# Full 242-color Tailwind palette
-node src/index.js tokens tailwind
+# Full AI synthesis with expert pipeline
+node src/index.js generate "A modern login card with email and password fields"
 
-# Predefined geometric spacing values (4px base)
-node src/index.js tokens spacing
+# Verbose — see which experts fired and why
+node src/index.js generate "A stat card showing `$12,500 revenue with +12% growth" --verbose
 
-# Standardized border corner radii constraints
-node src/index.js tokens radii
+# Dry-run — inspect pipeline output without rendering
+node src/index.js generate "A pricing page with 3 tiers" --dry-run
+```
 
-# Import W3C DTCG compliant tokens ($value, $type)
+**Pipeline trace output:**
+```
+🧠 [intent] Action: generate, Tags: [component]
+🔀 [gate] Selected 8 experts: guardian(1.00), builder(0.95), a11y(0.75),
+          token-expert(0.60), ux-writer(0.50), analyzer(0.40),
+          visual(0.40), responsive(0.40)
+⚡ → builder (0.95) → matched card/stat template
+⚡ → a11y (0.75) → WCAG check: 7.2:1 ✓
+⚡ → token-expert (0.60) → 2 raw colors → token recommendations
+✅ Pipeline finished in 9ms
+```
+
+### Builder Templates (Auto-Matched from Description)
+| Template | Triggered by |
+|---|---|
+| `button/primary` | "button", "CTA", "submit" |
+| `button/secondary` | "secondary button" |
+| `button/ghost` | "ghost button", "text button" |
+| `button/destructive` | "delete button", "destructive" |
+| `input/text` | "input", "field", "text field" |
+| `card/basic` | "card" |
+| `card/stat` | "stat card", "metric", "KPI" |
+| `badge/status` | "badge", "tag", "label" |
+| `nav/sidebar` | "sidebar", "navigation" |
+
+---
+
+## 3. Rendering (Guardian-Protected)
+
+### `render [jsx]` — JSX to Figma Canvas
+Guardian middleware validates **every render** before committing to canvas.
+
+| Flag | Effect |
+|---|---|
+| `--code <jsx>` / `-c` | Inline JSX string |
+| `--file <path>` / `-f` | Read JSX from file |
+| `--dry-run` | Parse + Guardian validate, no render |
+| `--verbose` | Show Guardian warnings in detail |
+
+```powershell
+# Render with Guardian pre-validation
+node src/index.js render --code "<Frame w={320} h={180} bg={#ffffff} flex={col} p={24} rounded={12}>
+  <Text size={20} weight={bold} color={#222} w={fill}>Alert</Text>
+</Frame>"
+
+# Dry-run with Guardian report
+node src/index.js render --dry-run --code "<Frame w={400} h={300} bg={#fff} p={24}><Text>Hello</Text></Frame>"
+```
+
+**Guardian validation output:**
+```
+Guardian: 0 errors, 2 warnings, 1 info
+  [!] [NO_RAW_COLORS] Frame: Raw hex color detected. Prefer design token references.
+  [!] [NO_RAW_COLORS] Text: Raw hex color detected. Prefer design token references.
+  [i] [NAMING] Frame: Node uses default generic name.
+```
+
+### Guardian Rules
+| Rule | Severity | What It Catches |
+|---|---|---|
+| `NO_RAW_COLORS` | warning | Hex fills/strokes that should be tokens |
+| `ROOT_SIZING` | error | Root frames without fixed numeric w/h |
+| `NAMING` | info | Default names (Frame, Rectangle, Text) |
+| `MIN_DIMENSIONS` | warning | Interactive elements < 44×44px |
+| `SPACING_SCALE` | info | Spacing values not on 4px grid |
+
+### `render-batch [jsxArray]` — Sequential Multi-Frame Render
+```powershell
+node src/index.js render-batch "[
+  \"<Frame name={Card_1} w={300} h={200} bg={#fff}><Text>1</Text></Frame>\",
+  \"<Frame name={Card_2} w={300} h={200} bg={#fff}><Text>2</Text></Frame>\"
+]"
+```
+
+---
+
+## 4. Token & Variable Management (TokenExpert Domain)
+
+### Presets
+```powershell
+node src/index.js tokens tailwind   # 242-color Tailwind palette
+node src/index.js tokens shadcn     # shadcn/ui tokens (Light + Dark modes)
+node src/index.js tokens spacing    # 4px-base geometric spacing scale
+node src/index.js tokens radii      # border-radius constraints
+node src/index.js tokens clear      # wipe all variables + collections
+```
+
+### W3C DTCG Import
+```powershell
 node src/index.js tokens w3c import "path/to/tokens.json"
-
-# Import from a standard JSON file
 node src/index.js tokens import "colors.json" --collection {Colors}
-
-# Clear all local variables and collections
-node src/index.js tokens clear
 ```
 
-### Manage Variable Collections
+### Collections
 ```powershell
-# Enumerate all accessible variables and collections
-node src/index.js var list
-
-# Enumerate all local styles (Text, Paint, Effect, Grid)
-node src/index.js style list
-
-# Create a variable collection
 node src/index.js col create {Semantic Colors}
-
-# Rename or delete a collection
 node src/index.js col rename {ID_OR_NAME} {New Name}
 node src/index.js col delete {ID_OR_NAME}
 ```
 
-### Manage Individual Variables
+### Variables
 ```powershell
-# Create a variable procedurally
+node src/index.js var list
 node src/index.js var create {primary/500} {COLOR} {#3b82f6} --collection {CollectionID}
-
-# Set a variable value for a specific mode
-node src/index.js var value {primary/500} {Dark Mode} {#1e3a8a}
-
-# Rename or delete a variable
 node src/index.js var rename {ID_OR_NAME} {new/name}
 node src/index.js var delete {ID_OR_NAME}
 ```
 
-### Manage Variable Modes
+### Modes
 ```powershell
-# Add a new mode to a collection
-node src/index.js mode add {Semantic Colors} {High Contrast}
-
-# Rename an existing mode
+node src/index.js mode add {Semantic Colors} {Dark}
 node src/index.js mode edit {Semantic Colors} {Light} {Day Mode}
-
-# Batch generate a Dark mode from Light (Auto-inverts colors)
 node src/index.js mode multi {Semantic Colors} --from {Light} --to {Dark} --strategy {invert}
 ```
 
-### Binding Variables
-Apply existing design tokens against specific structural elements.
-
+### Variable Binding
 ```powershell
 node src/index.js bind fill {primary/500}
 node src/index.js bind gap {spacing/md}
 node src/index.js bind radius {radius/sm}
-
-# Apply specifically to targeted Layer IDs
 node src/index.js bind padding {spacing/lg} -n {ID1} {ID2}
+```
+
+### Styles
+```powershell
+node src/index.js style list
+node src/index.js style update {Inter} [pattern]
 ```
 
 ---
 
-## 3. Rendering & Generation (MoE Agent Pipeline)
+## 5. Canvas Query & Mutation (Analyzer Domain)
 
-Construct primitives or deploy robust semantic AST templates directly on the canvas.
-The `generate` command uses the **Mix-of-Experts pipeline** — 8 specialized agents collaborate to produce validated, accessible, design-system-compliant UI.
-
-### AI-Powered UI Synthesis (MoE Pipeline)
+### Inspection
 ```powershell
-# Synthesize a high-fidelity Figma UI from a description
-node src/index.js generate "A modern login card with email and password fields"
-
-# Verbose mode — shows full pipeline trace with expert scores
-node src/index.js generate "A stat card with revenue" --verbose
-
-# Dry-run — pipeline executes but no render to Figma
-node src/index.js generate "A pricing page" --dry-run
-
-# Theme mode
-node src/index.js generate "A dashboard sidebar" --mode {Dark}
+node src/index.js canvas info      # current page/selection state
+node src/index.js get {1:234}      # node properties (default: selection)
+node src/index.js inspect {1:234}  # deep inspect → returns JSX
+node src/index.js find {Card}      # find nodes by name
 ```
 
-**Pipeline Trace (verbose mode):**
-```
-🧠 [intent] Action: generate, Tags: [component]
-🔀 [gate] Selected 8 experts: guardian(1.00), builder(0.95), a11y(0.75)...
-⚡ [execute] → guardian (1.00)
-⚡ [execute] → builder (0.95) → matched card/stat template
-⚡ [execute] → a11y (0.75) → WCAG contrast check
-⚡ [execute] → token-expert (0.60) → raw color recommendations
-✅ [complete] Pipeline finished in 9ms
+### Mutation
+```powershell
+node src/index.js update {1:234} "<Frame bg={#000} />"  # update node via JSX
+node src/index.js node to-component {1:234}              # convert to component
+node src/index.js node delete {1:234}                    # delete node
 ```
 
-### Render Expressive JSX
-Leverages the robust parser mapping declarative attributes to native Figma API equivalents.
-The **Guardian agent** validates every render for design system compliance.
-**Mandate:** Wrap all property values in `{}` and escape any `$` (e.g., `` `$ ``).
+---
+
+## 6. Responsive & Skeleton (Responsive Expert Domain)
 
 ```powershell
-node src/index.js render --code "<Frame w={320} h={180} bg={#ffffff} flex={col} p={24} rounded={12}>
-  <Text size={20} weight={bold} color={#222222} w={fill}>Success Alert</Text>
-</Frame>"
-
-# Dry-run with Guardian validation report
-node src/index.js render --dry-run --code "<Frame w={400} h={300} bg={#fff} rounded={12} p={24}><Text>Hello</Text></Frame>"
-```
-
-**Guardian Output (dry-run):**
-```
-Guardian: 0 errors, 1 warning, 1 info
-  [!] [NO_RAW_COLORS] Frame: Raw hex color detected. Prefer design token references.
-  [i] [NAMING] Frame: Node uses default generic name.
-```
-
-### Batch Rendering
-```powershell
-node src/index.js render-batch "[
-  \"<Frame name={First_Child} w={300} h={200} bg={#fff}><Text>1</Text></Frame>\",
-  \"<Frame name={Second_Child} w={300} h={200} bg={#fff}><Text>2</Text></Frame>\"
-]"
-```
-
-### Advanced UI Automation
-```powershell
-# Inject JSON data into a component matching layer names starting with #
-node src/index.js hydrate {data.json} {Card_Component} --clone
-
-# Test layout responsiveness by generating clones at different breakpoints
+# Clone at multiple breakpoints (375, 768, 1440)
 node src/index.js responsive {Dashboard} --breakpoints {375,768,1440}
 
-# Convert a UI component into a skeleton loading state
+# Convert to skeleton loading state
 node src/index.js skeleton {Profile_Card} --color {#e2e8f0}
 ```
 
 ---
 
-## 4. Query & Mutation Operations
-
-Search, mutate, or organize existing document structures.
-
-### Selectors & Inspection
-```powershell
-# View current selection and canvas details
-node src/index.js canvas info
-
-# Retrieve properties (defaults to selection if no ID provided)
-node src/index.js get {1:234}
-
-# Deep inspect and return JSX (defaults to selection)
-node src/index.js inspect {1:234}
-
-# Find nodes by name
-node src/index.js find {Card}
-```
-
-### Mutation Operations
-```powershell
-# Update an existing node (defaults to selection)
-node src/index.js update {1:234} "<Frame bg={#000000} />"
-```
-
-### Organizational Hygiene
-```powershell
-# Node operations: to-component, delete (defaults to selection)
-node src/index.js node to-component {1:234}
-node src/index.js node delete {1:234}
-```
-
----
-
-## 5. Prototyping
-
-Create interactive prototypes directly from the command line.
+## 7. Prototyping
 
 ```powershell
-# Create a prototype interaction from a source node to a target node
 node src/index.js proto link {Button} {Target_Frame} --trigger {ON_CLICK} --transition {SMART_ANIMATE}
 ```
 
 ---
 
-## 6. Exports & Auditing
+## 8. Auditing (A11y Expert Domain)
 
-Generate assets and evaluate semantic design rules.
-
-### Exporting
 ```powershell
-# Export design system as zip with themes, tokens, and metadata
-node src/index.js export-zip -o {dist}
-```
-
-### Auditing
-```powershell
-# Perform an autonomous accessibility audit for color contrast failures
+# Accessibility audit — contrast failures, touch targets
 node src/index.js audit a11y --page
 ```
 
 ---
 
-## 7. FigJam Support
-
-FigJam implements a distinct subset of the Plugin API that demands separate abstractions.
+## 9. Exports
 
 ```powershell
-# List available FigJam pages
-node src/index.js fj pages
-
-# Create a sticky note
-node src/index.js fj sticky {Meeting Note} -x {100} -y {100} --color {#FEF08A}
+node src/index.js export-zip -o {dist}
 ```
 
 ---
 
-## 8. Automated Design Workflow (Alfa)
-
-An end-to-end workflow to scaffold and configure design systems.
+## 10. Design Workflow (Alfa)
 
 ```powershell
-# Step 1: Scaffold a new project and research folder
-node src/index.js design start
-
-# Step 2: Define product architecture and screens
-node src/index.js design architecture
-
-# Step 3: Configure design system tokens (palette, roundness)
-node src/index.js design tokens
-
-# Check the status of the current workflow
-node src/index.js design status
+node src/index.js design start         # scaffold project
+node src/index.js design architecture  # define screens
+node src/index.js design tokens        # configure token palette
+node src/index.js design status        # workflow progress
 ```
 
 ---
 
-## 9. Advanced JavaScript Execution
+## 11. Advanced Execution
 
-Deploy complex logic directly inside the Figma application using `eval` or `run`.
-
-### Execute Inline JavaScript
 ```powershell
-node src/index.js eval "figma.currentPage.selection[0].fills = [{ type: 'SOLID', color: { r: 1, g: 0, b: 0 } }]"
-```
+# Inline JavaScript in Figma environment
+node src/index.js eval "figma.currentPage.selection[0].fills = [{type:'SOLID', color:{r:1,g:0,b:0}}]"
 
-### Run Logic Scripts
-```powershell
-# Execute a JavaScript file directly in the Figma environment
+# Run a JS file inside Figma
 node src/index.js run path/to/script.js
 ```
 
 ---
 
-## 10. MoE Agent System (Architecture)
+## 12. Data Hydration
 
-The agent system lives in `src/agents/` and `src/memory/`.
+```powershell
+# Inject JSON data into Figma components matching layer names starting with #
+node src/index.js hydrate {data.json} {Card_Component} --clone
+```
 
-### Agent Files
-| File | Expert | Purpose |
-|---|---|---|
-| `expert.js` | Base class | Relevance gating + execute contract |
-| `orchestrator.js` | Orchestrator | Intent parsing → gating → pipeline dispatch |
-| `guardian.js` | Guardian | 5-rule pre-render validation |
-| `token-expert.js` | TokenExpert | Token inventory + recommendations |
-| `analyzer.js` | Analyzer | Design pattern analysis |
-| `builder.js` | Builder | 8 component templates + NL matching |
-| `ux-writer.js` | UXWriter | 60+ copy patterns |
-| `a11y-expert.js` | A11y | WCAG 2.2 contrast + touch targets |
-| `responsive-expert.js` | Responsive | Breakpoint analysis |
-| `visual-expert.js` | Visual | 15 SVG icons + keyword finder |
-| `index.js` | Loader | Bootstraps all experts + memory |
+---
 
-### Memory System
-| Store | Location | Purpose |
-|---|---|---|
-| `patterns.json` | `~/.figma-cli/memory/` | Reusable component templates |
-| `token-history.json` | `~/.figma-cli/memory/` | Token value evolution |
-| `preferences.json` | `~/.figma-cli/memory/` | Learned user style choices |
-| `errors.json` | `~/.figma-cli/memory/` | Error catalog + fixes |
-| `executions.json` | `~/.figma-cli/memory/` | Pipeline execution log |
+## 13. FigJam
 
-### Guardian Rules
-| Rule | Severity | Detects |
-|---|---|---|
-| `NO_RAW_COLORS` | warning | Hex fills that should be tokens |
-| `ROOT_SIZING` | error | Root frames without fixed w/h |
-| `NAMING` | info | Default generic node names |
-| `MIN_DIMENSIONS` | warning | Touch targets < 44×44px |
-| `SPACING_SCALE` | info | Values not on 4px grid |
+```powershell
+node src/index.js fj pages
+node src/index.js fj sticky {Meeting Note} -x {100} -y {100} --color {#FEF08A}
+```
+
+---
+
+## 14. Utilities
+
+```powershell
+node src/index.js send-feedback "Great tool!"
+```
+
+---
+
+## Appendix: MoE Agent Files
+
+| File | Expert | Gate | Priority |
+|---|---|---|---|
+| `src/agents/expert.js` | Base class | — | — |
+| `src/agents/orchestrator.js` | 🧠 Orchestrator | Router | — |
+| `src/agents/guardian.js` | 🛡️ Guardian | 1.00 | 90 |
+| `src/agents/builder.js` | 🏗️ Builder | 0.95 | 30 |
+| `src/agents/a11y-expert.js` | ♿ A11y | 0.75 | 85 |
+| `src/agents/token-expert.js` | 🎨 TokenExpert | 0.60 | 10 |
+| `src/agents/ux-writer.js` | ✏️ UXWriter | 0.50 | 25 |
+| `src/agents/analyzer.js` | 🔍 Analyzer | 0.40 | 5 |
+| `src/agents/visual-expert.js` | 🖼️ Visual | 0.40 | 20 |
+| `src/agents/responsive-expert.js` | 📱 Responsive | 0.40 | 70 |
+| `src/agents/index.js` | Loader | — | — |
+| `src/memory/design-memory.js` | 🗄️ Memory | — | — |

@@ -12,17 +12,35 @@ import { Expert } from './expert.js';
 const DEFAULT_SEMANTIC_TOKENS = {
   'color/primary': { type: 'COLOR', value: '#3b82f6', description: 'Primary brand color' },
   'color/primary-hover': { type: 'COLOR', value: '#2563eb', description: 'Primary hover state' },
+  'color/primary-light': { type: 'COLOR', value: '#dbeafe', description: 'Primary light/bg state' },
+  'color/on-primary': { type: 'COLOR', value: '#ffffff', description: 'Text on primary' },
   'color/secondary': { type: 'COLOR', value: '#64748b', description: 'Secondary/muted color' },
   'color/surface': { type: 'COLOR', value: '#ffffff', description: 'Default surface background' },
   'color/surface-elevated': { type: 'COLOR', value: '#f8fafc', description: 'Elevated surface (cards)' },
+  'color/surface-elevated-dark': { type: 'COLOR', value: '#334155', description: 'Dark elevated surface' },
+  'color/surface-muted': { type: 'COLOR', value: '#f8fafc', description: 'Muted surface' },
+  'color/surface-active': { type: 'COLOR', value: '#e2e8f0', description: 'Active surface' },
+  'color/surface-inverse': { type: 'COLOR', value: '#111827', description: 'Inverse surface' },
+  'color/surface-inverse-dark': { type: 'COLOR', value: '#1e293b', description: 'Dark inverse surface' },
+  'color/surface-dark': { type: 'COLOR', value: '#0f172a', description: 'Dark surface' },
   'color/on-surface': { type: 'COLOR', value: '#0f172a', description: 'Text on surface' },
   'color/on-surface-muted': { type: 'COLOR', value: '#64748b', description: 'Secondary text' },
+  'color/on-surface-variant': { type: 'COLOR', value: '#374151', description: 'Tertiary text' },
+  'color/on-surface-active': { type: 'COLOR', value: '#f1f5f9', description: 'Active text' },
+  'color/on-surface-inverse': { type: 'COLOR', value: '#ffffff', description: 'Text on inverse surface' },
   'color/destructive': { type: 'COLOR', value: '#ef4444', description: 'Error/destructive actions' },
+  'color/destructive-light': { type: 'COLOR', value: '#fef2f2', description: 'Error background' },
+  'color/on-destructive': { type: 'COLOR', value: '#ffffff', description: 'Text on destructive' },
   'color/success': { type: 'COLOR', value: '#22c55e', description: 'Success states' },
+  'color/success-light': { type: 'COLOR', value: '#ecfdf5', description: 'Success background' },
   'color/warning': { type: 'COLOR', value: '#f59e0b', description: 'Warning states' },
+  'color/warning-light': { type: 'COLOR', value: '#fffbeb', description: 'Warning background' },
   'color/info': { type: 'COLOR', value: '#3b82f6', description: 'Info states' },
+  'color/info-light': { type: 'COLOR', value: '#eff6ff', description: 'Info background' },
   'color/border': { type: 'COLOR', value: '#e2e8f0', description: 'Default border color' },
   'color/border-strong': { type: 'COLOR', value: '#cbd5e1', description: 'Emphasized borders' },
+  'color/border-light': { type: 'COLOR', value: '#f1f5f9', description: 'Light borders' },
+  'color/border-dark': { type: 'COLOR', value: '#475569', description: 'Dark borders' },
 };
 
 const DEFAULT_SPACING_TOKENS = {
@@ -50,6 +68,7 @@ export class TokenExpert extends Expert {
   description = 'Token intelligence — checks, creates, and recommends design tokens.';
   capabilities = ['token', 'color', 'spacing', 'design-system'];
   priority = 10; // Runs early — tokens must exist before building
+  phase = 'pre';
 
   relevance(intent) {
     if (intent.action === 'tokens') return 0.95;

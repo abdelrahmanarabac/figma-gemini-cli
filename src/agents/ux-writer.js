@@ -95,6 +95,7 @@ export class UXWriterExpert extends Expert {
   description = 'Contextual microcopy generation — labels, placeholders, CTAs, error messages.';
   capabilities = ['typography', 'text', 'ux-writing'];
   priority = 25; // After token-expert, before builder finishes
+  phase = 'pre';
 
   relevance(intent) {
     if (intent.tags.includes('typography')) return 0.7;

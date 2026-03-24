@@ -61,6 +61,7 @@ export class VisualExpert extends Expert {
   description = 'SVG icon/illustration/chart generation.';
   capabilities = ['icon', 'visual', 'chart'];
   priority = 20; // After tokens, before builder finalizes
+  phase = 'pre';
 
   relevance(intent) {
     if (intent.tags.includes('icon')) return 0.9;

@@ -75,6 +75,7 @@ export class ResponsiveExpert extends Expert {
   description = 'Responsive layout intelligence — breakpoint analysis and adaptive recommendations.';
   capabilities = ['layout', 'responsive'];
   priority = 70; // After building, before final validation
+  phase = 'post';
 
   relevance(intent) {
     if (intent.action === 'responsive') return 0.95;

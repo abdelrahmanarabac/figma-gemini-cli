@@ -19,9 +19,10 @@ class GenerateCommand extends Command {
 
     try {
       // ── MoE Pipeline ──────────────────────────────
-      const { orchestrator } = await ctx.getAgents();
+      const agents = await ctx.getAgents();
+      const orchestrator = agents.orchestrator;
 
-      const pipelineResult = await orchestrator.execute(ctx, description, {
+      const pipelineResult = await orchestrator.execute(ctx, description, {}, {
         mode: options.mode,
       });
 
@@ -48,8 +49,8 @@ class GenerateCommand extends Command {
       // Show Guardian validation report
       if (guardianResult?.data?.report) {
         const report = guardianResult.data.report;
-        if (report.violations.length > 0) {
-          ctx.logWarning(`Guardian: ${report.stats.warnings} warnings, ${report.stats.errors} errors, ${report.stats.info} info`);
+        if (report.violations && report.violations.length > 0) {
+          ctx.logWarning(`Guardian: ${report.stats?.warnings || 0} warnings, ${report.stats?.errors || 0} errors`);
           if (options.verbose) {
             report.violations.forEach(v => {
               const icon = v.severity === 'error' ? '❌' : v.severity === 'warning' ? '⚠️' : 'ℹ️';
@@ -67,7 +68,7 @@ class GenerateCommand extends Command {
         if (a11y.pass) {
           ctx.logSuccess(`A11y: Score ${a11y.score}/100 ✓`);
         } else {
-          ctx.logWarning(`A11y: Score ${a11y.score}/100 — ${a11y.issues.length} issues`);
+          ctx.logWarning(`A11y: Score ${a11y.score}/100 — ${(a11y.issues || []).length} issues`);
         }
       }
 
@@ -86,7 +87,7 @@ class GenerateCommand extends Command {
         console.log('------------------------\n');
       }
 
-      if (options.dryRun) {
+      if (options.dryRun || options.dryrun) {
         ctx.logSuccess('Dry-run complete. Pipeline finished without rendering.');
         return;
       }
@@ -95,7 +96,7 @@ class GenerateCommand extends Command {
       if (result && result.error) {
         ctx.logError(`Render failed: ${result.error}`);
       } else {
-        const templateUsed = builderResult?.data?.templateUsed;
+        const templateUsed = builderResult?.data?.templateUsed || pipelineResult.pipelineData?.templateUsed;
         ctx.logSuccess(`UI rendered successfully${templateUsed ? ` (template: ${templateUsed})` : ''} — ${pipelineResult.duration}ms`);
       }
     } catch (err) {

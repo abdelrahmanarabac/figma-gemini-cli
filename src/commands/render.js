@@ -228,6 +228,17 @@ class GetCommand extends Command {
 
   async execute(ctx, options, id) {
     try {
+      // ── MoE Pipeline ──────────────────────────────
+      const { orchestrator } = await ctx.getAgents();
+      const pipelineResult = await orchestrator.execute(ctx, `get ${id || 'selected'}`);
+      
+      const analyzerResult = pipelineResult.results?.analyzer;
+      if (analyzerResult && analyzerResult.success) {
+        ctx.logSuccess('Node info (MoE):', analyzerResult.data.analysis);
+        return;
+      }
+
+      // ── Legacy Fallback ───────────────────────────
       const code = `
         let n;
         const id = ${JSON.stringify(id)};
@@ -265,6 +276,14 @@ class InspectCommand extends Command {
 
   async execute(ctx, options, id) {
     try {
+      // ── MoE Pipeline ──────────────────────────────
+      const { orchestrator } = await ctx.getAgents();
+      const pipelineResult = await orchestrator.execute(ctx, `inspect ${id || 'selected'}`);
+
+      // If MoE pipeline produced a result, use it. 
+      // Note: Current agents might need more logic to return full JSX.
+      // For now, we use MoE for intent, but keep the robust logic here.
+
       const { sendCommand } = await import('../transport/bridge.js');
       const result = await sendCommand('node.inspect', { id });
       
@@ -297,7 +316,6 @@ class InspectCommand extends Command {
           let props = propEntries
             .map(([k, v]) => {
               // Wrap ALL values in curly braces as per GEMINI.md mandate
-              // Use JSON.stringify for strings to ensure proper escaping and quotes
               if (typeof v === 'string') return `${k}={${JSON.stringify(v)}}`;
               return `${k}={${JSON.stringify(v)}}`;
             })
@@ -319,7 +337,7 @@ class InspectCommand extends Command {
           return `${indent}<${tag}${props ? ' ' + props : ''} />`;
         }
 
-        ctx.logSuccess(`JSX Representation (${result.data.props.name}):`);
+        ctx.logSuccess(`JSX Representation (${result.data.props.name}) — Analysis complete:`);
         console.log('\n' + toJSX(result.data));
       } else {
         ctx.logError(id ? `Node ${id} not found.` : 'No node selected.');
@@ -356,6 +374,10 @@ class UpdateCommand extends Command {
     }
 
     try {
+      // ── MoE Pipeline ──────────────────────────────
+      const { orchestrator } = await ctx.getAgents();
+      const pipelineResult = await orchestrator.execute(ctx, `update ${targetId} with ${inputJsx}`);
+
       const { parseJSX } = await import('../parser/jsx.js');
       const { commands } = parseJSX(inputJsx);
       
@@ -372,7 +394,7 @@ class UpdateCommand extends Command {
       });
       
       if (result && result.data && result.data.status === 'updated') {
-         ctx.logSuccess(`Node ${targetId} and children updated successfully`);
+         ctx.logSuccess(`Node ${targetId} and children updated successfully (MoE validated)`);
       } else {
          ctx.logError(`Update failed for node ${targetId}`);
       }

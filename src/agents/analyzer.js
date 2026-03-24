@@ -12,9 +12,10 @@ export class AnalyzerExpert extends Expert {
   description = 'Canvas inspection, design pattern extraction, and inconsistency detection.';
   capabilities = ['validation', 'analysis', 'audit'];
   priority = 5; // Runs very early — context gathering
+  phase = 'post'; // Analyzes existing canvas OR post-generation output
 
   relevance(intent) {
-    if (intent.action === 'audit') return 0.95;
+    if (intent.action === 'audit' || intent.action === 'inspect' || intent.action === 'get') return 0.95;
     if (intent.tags.includes('validation')) return 0.8;
     // Moderate relevance for generate — gathers context first
     if (intent.action === 'generate') return 0.4;
@@ -51,20 +52,22 @@ export class AnalyzerExpert extends Expert {
       }
 
       // Spacing tracking
-      for (const key of ['itemSpacing', 'padding', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft']) {
+      for (const key of ['gap', 'p', 'px', 'py', 'pt', 'pr', 'pb', 'pl']) {
         if (typeof props[key] === 'number') {
           report.spacingValues.add(props[key]);
         }
       }
 
       // Radius tracking
-      if (typeof props.cornerRadius === 'number') {
-        report.radiusValues.add(props.cornerRadius);
+      for (const key of ['rounded', 'roundedT', 'roundedB', 'roundedL', 'roundedR', 'roundedTL', 'roundedTR', 'roundedBL', 'roundedBR']) {
+        if (typeof props[key] === 'number') {
+          report.radiusValues.add(props[key]);
+        }
       }
 
       // Typography tracking
-      if (typeof props.fontSize === 'number') report.fontSizes.add(props.fontSize);
-      if (props.fontWeight) report.fontWeights.add(props.fontWeight);
+      if (typeof props.size === 'number') report.fontSizes.add(props.size);
+      if (props.weight) report.fontWeights.add(props.weight);
     }
 
     // Detect inconsistencies
@@ -97,12 +100,26 @@ export class AnalyzerExpert extends Expert {
   }
 
   async execute(ctx, task, pipelineData = {}) {
-    const commands = pipelineData.commands || [];
+    let commands = pipelineData.commands || [];
+    
+    // If no commands but we have an ID or intent, try to fetch the node context
+    if (commands.length === 0 && (pipelineData.intent?.action === 'get' || pipelineData.intent?.action === 'inspect')) {
+      const id = pipelineData.id || (pipelineData.intent.raw.match(/get\s+([^\s]+)/i)?.[1]) || 'selected';
+      try {
+        const { sendCommand } = await import('../transport/bridge.js');
+        const result = await sendCommand('node.inspect', { id: id === 'selected' ? undefined : id });
+        if (result && result.data) {
+          // Virtual command for analysis
+          commands = [{ command: 'node.create', params: { type: result.data.type, props: result.data.props, id: result.data.id } }];
+        }
+      } catch { /* Silent fail, fall back to empty */ }
+    }
+
     const report = this.analyzeCommands(commands);
 
     return {
       success: true,
-      data: { analysis: report },
+      data: { analysis: report, commands },
       metadata: { analyzedCommands: commands.length, issueCount: report.issues.length },
       warnings: report.issues.filter(i => i.severity === 'warning').map(i => i.message),
       errors: report.issues.filter(i => i.severity === 'error').map(i => i.message),
