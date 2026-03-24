@@ -48,12 +48,56 @@ class RenderCommand extends Command {
     if (options.dryRun) {
       const { parseJSX } = await import('../parser/jsx.js');
       const { commands } = parseJSX(inputJsx);
+
+      // ── Guardian Pre-Validation ──
+      try {
+        const { orchestrator } = await ctx.getAgents();
+        const guardian = orchestrator.experts.find(e => e.name === 'guardian');
+        if (guardian) {
+          const report = guardian.validate(commands);
+          if (report.violations.length > 0) {
+            console.log(`\n  Guardian: ${report.stats.errors} errors, ${report.stats.warnings} warnings, ${report.stats.info} info`);
+            report.violations.forEach(v => {
+              const icon = v.severity === 'error' ? '[X]' : v.severity === 'warning' ? '[!]' : '[i]';
+              console.log(`    ${icon} [${v.ruleId}] ${v.nodeName}: ${v.message}`);
+            });
+            console.log('');
+          } else {
+            console.log('  Guardian: All rules passed ✓\n');
+          }
+        }
+      } catch { /* Guardian is optional, don't block dry-run */ }
+
       ctx.logSuccess('Dry-run complete. Commands:');
       console.log(JSON.stringify(commands, null, 2));
       return;
     }
 
     try {
+      // ── Guardian Middleware (pre-render validation) ──
+      if (options.validate !== false) {
+        try {
+          const { parseJSX } = await import('../parser/jsx.js');
+          const { commands } = parseJSX(inputJsx);
+          const { orchestrator } = await ctx.getAgents();
+          const guardian = orchestrator.experts.find(e => e.name === 'guardian');
+          if (guardian && commands.length > 0) {
+            const report = guardian.validate(commands);
+            if (report.stats.errors > 0) {
+              ctx.logWarning(`Guardian detected ${report.stats.errors} error(s):`);
+              report.violations
+                .filter(v => v.severity === 'error')
+                .forEach(v => ctx.logError(`  [${v.ruleId}] ${v.nodeName}: ${v.message}`));
+            }
+            if (options.verbose && report.stats.warnings > 0) {
+              report.violations
+                .filter(v => v.severity === 'warning')
+                .forEach(v => ctx.logWarning(`  [${v.ruleId}] ${v.nodeName}: ${v.message}`));
+            }
+          }
+        } catch { /* Guardian errors don't block rendering */ }
+      }
+
       const result = await ctx.render(inputJsx);
       if (result && result.error) {
          ctx.logError(`Render failed: ${result.error}`);

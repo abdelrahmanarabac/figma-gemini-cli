@@ -1,6 +1,6 @@
 # Command Reference: figma-gemini-cli
 
-The `figma-gemini-cli` provides a comprehensive suite of commands for manipulating the Figma workspace, managing design tokens, and automating design workflows.
+The `figma-gemini-cli` provides a comprehensive suite of commands for manipulating the Figma workspace, managing design tokens, automating design workflows, and an intelligent **Mix-of-Experts (MoE) agent pipeline** for AI-powered design generation.
 
 ---
 
@@ -104,24 +104,56 @@ node src/index.js bind padding {spacing/lg} -n {ID1} {ID2}
 
 ---
 
-## 3. Rendering & Generation
+## 3. Rendering & Generation (MoE Agent Pipeline)
 
 Construct primitives or deploy robust semantic AST templates directly on the canvas.
+The `generate` command uses the **Mix-of-Experts pipeline** — 8 specialized agents collaborate to produce validated, accessible, design-system-compliant UI.
 
-### AI-Powered UI Synthesis
+### AI-Powered UI Synthesis (MoE Pipeline)
 ```powershell
 # Synthesize a high-fidelity Figma UI from a description
-node src/index.js generate {A modern login card with email and password fields}
+node src/index.js generate "A modern login card with email and password fields"
+
+# Verbose mode — shows full pipeline trace with expert scores
+node src/index.js generate "A stat card with revenue" --verbose
+
+# Dry-run — pipeline executes but no render to Figma
+node src/index.js generate "A pricing page" --dry-run
+
+# Theme mode
+node src/index.js generate "A dashboard sidebar" --mode {Dark}
+```
+
+**Pipeline Trace (verbose mode):**
+```
+🧠 [intent] Action: generate, Tags: [component]
+🔀 [gate] Selected 8 experts: guardian(1.00), builder(0.95), a11y(0.75)...
+⚡ [execute] → guardian (1.00)
+⚡ [execute] → builder (0.95) → matched card/stat template
+⚡ [execute] → a11y (0.75) → WCAG contrast check
+⚡ [execute] → token-expert (0.60) → raw color recommendations
+✅ [complete] Pipeline finished in 9ms
 ```
 
 ### Render Expressive JSX
 Leverages the robust parser mapping declarative attributes to native Figma API equivalents.
+The **Guardian agent** validates every render for design system compliance.
 **Mandate:** Wrap all property values in `{}` and escape any `$` (e.g., `` `$ ``).
 
 ```powershell
 node src/index.js render --code "<Frame w={320} h={180} bg={#ffffff} flex={col} p={24} rounded={12}>
   <Text size={20} weight={bold} color={#222222} w={fill}>Success Alert</Text>
 </Frame>"
+
+# Dry-run with Guardian validation report
+node src/index.js render --dry-run --code "<Frame w={400} h={300} bg={#fff} rounded={12} p={24}><Text>Hello</Text></Frame>"
+```
+
+**Guardian Output (dry-run):**
+```
+Guardian: 0 errors, 1 warning, 1 info
+  [!] [NO_RAW_COLORS] Frame: Raw hex color detected. Prefer design token references.
+  [i] [NAMING] Frame: Node uses default generic name.
 ```
 
 ### Batch Rendering
@@ -257,3 +289,42 @@ node src/index.js eval "figma.currentPage.selection[0].fills = [{ type: 'SOLID',
 # Execute a JavaScript file directly in the Figma environment
 node src/index.js run path/to/script.js
 ```
+
+---
+
+## 10. MoE Agent System (Architecture)
+
+The agent system lives in `src/agents/` and `src/memory/`.
+
+### Agent Files
+| File | Expert | Purpose |
+|---|---|---|
+| `expert.js` | Base class | Relevance gating + execute contract |
+| `orchestrator.js` | Orchestrator | Intent parsing → gating → pipeline dispatch |
+| `guardian.js` | Guardian | 5-rule pre-render validation |
+| `token-expert.js` | TokenExpert | Token inventory + recommendations |
+| `analyzer.js` | Analyzer | Design pattern analysis |
+| `builder.js` | Builder | 8 component templates + NL matching |
+| `ux-writer.js` | UXWriter | 60+ copy patterns |
+| `a11y-expert.js` | A11y | WCAG 2.2 contrast + touch targets |
+| `responsive-expert.js` | Responsive | Breakpoint analysis |
+| `visual-expert.js` | Visual | 15 SVG icons + keyword finder |
+| `index.js` | Loader | Bootstraps all experts + memory |
+
+### Memory System
+| Store | Location | Purpose |
+|---|---|---|
+| `patterns.json` | `~/.figma-cli/memory/` | Reusable component templates |
+| `token-history.json` | `~/.figma-cli/memory/` | Token value evolution |
+| `preferences.json` | `~/.figma-cli/memory/` | Learned user style choices |
+| `errors.json` | `~/.figma-cli/memory/` | Error catalog + fixes |
+| `executions.json` | `~/.figma-cli/memory/` | Pipeline execution log |
+
+### Guardian Rules
+| Rule | Severity | Detects |
+|---|---|---|
+| `NO_RAW_COLORS` | warning | Hex fills that should be tokens |
+| `ROOT_SIZING` | error | Root frames without fixed w/h |
+| `NAMING` | info | Default generic node names |
+| `MIN_DIMENSIONS` | warning | Touch targets < 44×44px |
+| `SPACING_SCALE` | info | Values not on 4px grid |

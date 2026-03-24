@@ -130,7 +130,11 @@ export class CliRouter {
       try {
         // Connection gating: check before execute if command requires it
         if (commandInstance.needsConnection) {
-          await this._ensureConnection(ctx);
+          const isConnected = await this._ensureConnection(ctx);
+          if (!isConnected) {
+            process.exitCode = 1;
+            return;
+          }
         }
 
         await commandInstance.execute(ctx, allOptions, ...commandArgs);
@@ -145,23 +149,24 @@ export class CliRouter {
   }
 
   /**
-   * Verify Figma connection is available. Exits if not.
+   * Verify Figma connection is available.
    * @param {CommandContext} ctx
+   * @returns {Promise<boolean>}
    */
   async _ensureConnection(ctx) {
     try {
       const res = await fetch(`http://127.0.0.1:3456/health`, { signal: AbortSignal.timeout(2000) });
       const data = await res.json();
       if (data.status === 'ok' && data.plugin) {
-        return;
+        return true;
       }
     } catch { }
 
-    // Not connected — show helpful message and exit
-    console.log(chalk.red('\n✗ Not connected to Figma\n'));
+    // Not connected â€” show helpful message but don't force exit here if we can handle it
+    console.log(chalk.red('\nâś— Not connected to Figma\n'));
     console.log(chalk.white('  Ensure the FigCli plugin is open in Figma and run:'));
     console.log(chalk.cyan('  figma-gemini-cli connect\n'));
-    process.exit(1);
+    return false;
   }
 
   run(argv) {

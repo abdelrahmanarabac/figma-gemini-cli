@@ -89,8 +89,9 @@ class VarCreateCommand extends Command {
 
         async function parseValue(val, type, alias) {
           if (alias) {
-            const target = variables.find(v => v.name === val || v.id === val);
-            if (!target) throw new Error('Alias target variable not found: ' + val);
+            const cleanVal = val.startsWith('{') && val.endsWith('}') ? val.slice(1, -1) : val;
+            const target = variables.find(v => v.name === cleanVal || v.id === cleanVal);
+            if (!target) throw new Error('Alias target variable not found: ' + cleanVal);
             return { type: 'VARIABLE_ALIAS', id: target.id };
           }
           if (type === 'COLOR') {

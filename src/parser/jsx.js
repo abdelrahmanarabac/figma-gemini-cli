@@ -77,7 +77,8 @@ const PROP_MAP = {
     data: 'data',
     complexity: 'complexity',
     strokeColor: 'strokeColor',
-    fillColor: 'fillColor'
+    fillColor: 'fillColor',
+    componentId: 'componentId'
 };
 
 const NUMERIC_PROPS = new Set([

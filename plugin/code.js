@@ -608,6 +608,20 @@ async function createNodeTransaction(type, props, parentId) {
     case 'ELLIPSE': node = figma.createEllipse(); break;
     case 'TEXT': node = figma.createText(); break;
     case 'LINE': node = figma.createLine(); break;
+    case 'INSTANCE':
+      if (props.componentId) {
+        const comp = await figma.getNodeByIdAsync(props.componentId);
+        if (comp && comp.type === 'COMPONENT') {
+          node = comp.createInstance();
+        } else if (comp && comp.type === 'COMPONENT_SET') {
+          node = comp.defaultVariant.createInstance();
+        } else {
+          node = figma.createFrame();
+        }
+      } else {
+        node = figma.createFrame();
+      }
+      break;
     case 'SVG': 
       if (props.content) {
         try {

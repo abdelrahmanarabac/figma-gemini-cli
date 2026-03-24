@@ -12,6 +12,37 @@ export class CommandContext {
     // Injected dependencies from the router to decouple Context from implementations
     this._deps = deps;
     this._figmaClient = null;
+    this._agentSystem = null;
+  }
+
+  // ── MoE Agent System ────────────────────────────────
+
+  /**
+   * Lazy-loaded agent system: orchestrator, experts, and memory.
+   * @returns {{ orchestrator: import('../agents/orchestrator.js').Orchestrator, memory: import('../memory/design-memory.js').DesignMemory, experts: Object }}
+   */
+  get agents() {
+    if (!this._agentSystem) {
+      // Lazy-init: loads synchronously on first access, then cached
+      this._agentSystem = this._initAgents();
+    }
+    return this._agentSystem;
+  }
+
+  async _initAgents() {
+    if (this._agentSystemResolved) return this._agentSystemResolved;
+    const { createAgentSystem } = await import('../agents/index.js');
+    this._agentSystemResolved = createAgentSystem();
+    return this._agentSystemResolved;
+  }
+
+  /**
+   * Async getter for agent system.
+   * @returns {Promise<{ orchestrator: any, memory: any, experts: Object }>}
+   */
+  async getAgents() {
+    if (this._agentSystemResolved) return this._agentSystemResolved;
+    return await this._initAgents();
   }
 
   // ── Output ───────────────────────────────────────────

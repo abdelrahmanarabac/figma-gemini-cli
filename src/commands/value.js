@@ -26,8 +26,9 @@ class VarSetValueCommand extends Command {
         if (!mode) return { success: false, error: 'Mode not found.' };
 
         async function parseValue(val, type) {
-          // Check for variable alias first
-          const target = variables.find(v => v.name === val || v.id === val);
+          // Check for variable alias first (strip braces if present)
+          const cleanVal = val.startsWith('{') && val.endsWith('}') ? val.slice(1, -1) : val;
+          const target = variables.find(v => v.name === cleanVal || v.id === cleanVal);
           if (target) {
             return { type: 'VARIABLE_ALIAS', id: target.id };
           }
