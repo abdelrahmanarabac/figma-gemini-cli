@@ -11,7 +11,14 @@ class CanvasInfoCommand extends Command {
       const code = `
         const selection = figma.currentPage.selection;
         if (selection.length === 0) {
-          return { selection: [], message: 'No nodes selected' };
+          return {
+            selection: [],
+            message: 'No nodes selected',
+            page: {
+              id: figma.currentPage.id,
+              name: figma.currentPage.name
+            }
+          };
         }
         
         return {
@@ -32,20 +39,31 @@ class CanvasInfoCommand extends Command {
       `;
       
       const result = await ctx.eval(code);
+      const selection = result?.selection || [];
+      const payload = {
+        page: result?.page || null,
+        selection,
+        selectionCount: selection.length,
+      };
       
-      if (!result || result.selection.length === 0) {
-        ctx.logWarning('No nodes are currently selected in Figma.');
+      if (selection.length === 0) {
+        ctx.output(
+          { ...payload, message: 'No nodes are currently selected in Figma.' },
+          () => ctx.logWarning('No nodes are currently selected in Figma.')
+        );
         return;
       }
 
-      console.log(chalk.cyan('\n  Current Selection:\n'));
-      result.selection.forEach((node, i) => {
-        console.log(chalk.white(`    ${i + 1}. [${node.type}] ${chalk.bold(node.name)}`));
-        console.log(chalk.gray(`       ID: ${node.id}`));
-        console.log(chalk.gray(`       Size: ${node.width}x${node.height} | Pos: ${node.x}, ${node.y}\n`));
+      ctx.output(payload, () => {
+        console.log(chalk.cyan('\n  Current Selection:\n'));
+        selection.forEach((node, i) => {
+          console.log(chalk.white(`    ${i + 1}. [${node.type}] ${chalk.bold(node.name)}`));
+          console.log(chalk.gray(`       ID: ${node.id}`));
+          console.log(chalk.gray(`       Size: ${node.width}x${node.height} | Pos: ${node.x}, ${node.y}\n`));
+        });
+
+        console.log(chalk.gray(`  Page: ${result.page.name} (${result.page.id})\n`));
       });
-      
-      console.log(chalk.gray(`  Page: ${result.page.name} (${result.page.id})\n`));
     } catch (err) {
       ctx.logError(`Failed to read canvas info: ${err.message}`);
     }

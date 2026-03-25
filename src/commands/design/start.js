@@ -1,12 +1,17 @@
 import { Command } from '../../cli/command.js';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { homedir } from 'os';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
+
+const CONFIG_DIR = join(homedir(), '.figma-cli');
+const WORKFLOW_PATH = join(CONFIG_DIR, 'current_workflow.json');
 
 class DesignStartCommand extends Command {
   name = 'design start';
   description = 'Run the Design Wizard [ALFA]';
+  needsConnection = false;
 
   async execute(ctx) {
     ctx.log(chalk.yellow('[ALFA]') + ' Starting the Design Wizard...');
@@ -81,6 +86,7 @@ class DesignStartCommand extends Command {
     
     try {
       // 1. Create folders
+      mkdirSync(CONFIG_DIR, { recursive: true });
       mkdirSync(projectDir, { recursive: true });
       mkdirSync(join(projectDir, 'research'), { recursive: true });
       mkdirSync(join(projectDir, 'wireframes'), { recursive: true });
@@ -109,17 +115,46 @@ ${answers.features.map(f => `- ${f}`).join('\n')}
 `;
 
       writeFileSync(join(projectDir, 'research', 'product-brief.md'), briefContent);
+      const workflow = {
+        stage: 'Architecture',
+        timestamp: new Date().toISOString(),
+        projectName: answers.projectName,
+        projectDir,
+        discovery: answers,
+      };
+      writeFileSync(WORKFLOW_PATH, JSON.stringify(workflow, null, 2));
 
-      ctx.logSuccess(`\nProject '${answers.projectName}' scaffolded successfully!`);
-      console.log(chalk.cyan('\nGenerated Structure:'));
-      console.log(chalk.white(`  ${answers.projectName}/`));
-      console.log(chalk.gray(`  ├── research/`));
-      console.log(chalk.blue(`  │   └── product-brief.md`));
-      console.log(chalk.gray(`  ├── wireframes/`));
-      console.log(chalk.gray(`  ├── ui/`));
-      console.log(chalk.gray(`  └── reports/`));
-      
-      console.log(chalk.green(`\nNext Steps: Open 'research/product-brief.md' to review your requirements.\n`));
+      const payload = {
+        success: true,
+        projectName: answers.projectName,
+        projectDir,
+        workflowPath: WORKFLOW_PATH,
+        stage: 'Architecture',
+        discovery: answers,
+        generated: {
+          directories: ['research', 'wireframes', 'ui', 'reports'],
+          files: [join(projectDir, 'research', 'product-brief.md')],
+        },
+        nextSteps: [
+          'Open research/product-brief.md to review your requirements.',
+          'Run `design architecture` to define the product structure.',
+        ],
+      };
+
+      if (ctx.isJson) {
+        ctx.logSuccess(`Project '${answers.projectName}' scaffolded successfully!`, payload);
+      } else {
+        ctx.logSuccess(`\nProject '${answers.projectName}' scaffolded successfully!`);
+        console.log(chalk.cyan('\nGenerated Structure:'));
+        console.log(chalk.white(`  ${answers.projectName}/`));
+        console.log(chalk.gray(`  ├── research/`));
+        console.log(chalk.blue(`  │   └── product-brief.md`));
+        console.log(chalk.gray(`  ├── wireframes/`));
+        console.log(chalk.gray(`  ├── ui/`));
+        console.log(chalk.gray(`  └── reports/`));
+        
+        console.log(chalk.green(`\nNext Steps: Open 'research/product-brief.md' to review your requirements, then run 'design architecture'.\n`));
+      }
 
     } catch (err) {
       ctx.logError(`Failed to scaffold project: ${err.message}`);

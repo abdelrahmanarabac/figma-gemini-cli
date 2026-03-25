@@ -1,6 +1,5 @@
 import { Command } from '../cli/command.js';
 import chalk from 'chalk';
-import ora from 'ora';
 
 class SkeletonCommand extends Command {
   name = 'skeleton <target>';
@@ -16,7 +15,7 @@ class SkeletonCommand extends Command {
   }
 
   async execute(ctx, options, target) {
-    const spinner = ora(`Locating target "${target}"...`).start();
+    const spinner = ctx.startSpinner(`Locating target "${target}"...`);
     
     try {
       // 1. Resolve target ID
@@ -27,31 +26,55 @@ class SkeletonCommand extends Command {
       }
 
       if (!targetId) {
-        spinner.fail(`Target component "${target}" not found.`);
+        process.exitCode = 1;
+        spinner.fail(`Target component "${target}" not found.`, {
+          success: false,
+          target,
+          error: 'Target component not found.',
+        });
         return;
       }
 
       spinner.text = `Generating skeleton for ${target}...`;
 
       // 2. Send skeleton command
-      const { sendCommand } = await import('../transport/bridge.js');
-      const result = await sendCommand('node.skeleton', {
+      const result = await ctx.command('node.skeleton', {
         id: targetId,
         color: options.color,
         rounded: parseInt(options.rounded, 10)
       });
-
-      spinner.stop();
+      const payload = {
+        success: result?.data?.status === 'skeletonized',
+        target,
+        targetId,
+        color: options.color,
+        rounded: parseInt(options.rounded, 10),
+        skeletonId: result?.data?.id || null,
+        skeletonName: result?.data?.name || null,
+      };
 
       if (result && result.data && result.data.status === 'skeletonized') {
-        ctx.logSuccess(`Skeleton state created: "${result.data.name}"`);
-        console.log(chalk.gray(`   ˘ ID: ${result.data.id}`));
+        if (ctx.isJson) {
+          ctx.logSuccess(`Skeleton state created: "${result.data.name}"`, payload);
+        } else {
+          spinner.succeed(`Skeleton state created: "${result.data.name}"`);
+          console.log(chalk.gray(`   ID: ${result.data.id}`));
+        }
       } else {
-        ctx.logError(`Skeleton generation failed: ${result.error || 'Unknown error'}`);
+        process.exitCode = 1;
+        spinner.fail(`Skeleton generation failed: ${result.error || 'Unknown error'}`, {
+          ...payload,
+          success: false,
+          error: result?.error || 'Unknown error',
+        });
       }
     } catch (err) {
-      spinner.fail('Skeleton error');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Skeleton error', {
+        success: false,
+        target,
+        error: err.message,
+      });
     }
   }
 }

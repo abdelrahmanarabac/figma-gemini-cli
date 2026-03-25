@@ -17,7 +17,7 @@ export const inputs = {
     const reqText = required ? ' *' : '';
     return `<Frame name={Input_${label.replace(/\\s+/g, '_')}} w={${w}} h={hug} flex={col} gap={6}>
   <Text size={13} weight={medium} color={${labelColor}} w={fill}>${label}${reqText}</Text>
-  <Frame w={fill} h={44} bg={${bg}} rounded={8} px={14} py={12} stroke={${border}} items={center}>
+  <Frame w={fill} h={44} flex={row} bg={${bg}} rounded={8} px={14} py={12} stroke={${border}} items={center}>
     <Text size={14} color={${placeholderColor}} w={fill}>${placeholder}</Text>
   </Frame>
 </Frame>`;
@@ -32,7 +32,7 @@ export const inputs = {
     const h = rows * 22 + 24;
     return `<Frame name={Textarea_${label.replace(/\\s+/g, '_')}} w={${w}} h={hug} flex={col} gap={6}>
   <Text size={13} weight={medium} color={${labelColor}} w={fill}>${label}</Text>
-  <Frame w={fill} h={${h}} bg={${bg}} rounded={8} px={14} py={12} stroke={${border}} items={start}>
+  <Frame w={fill} h={${h}} flex={col} bg={${bg}} rounded={8} px={14} py={12} stroke={${border}} items={start}>
     <Text size={14} color={${placeholderColor}} w={fill}>${placeholder}</Text>
   </Frame>
 </Frame>`;
@@ -62,7 +62,7 @@ export const inputs = {
     const checkColor = resolveToken(tokens, 'semantic', 'color/on-primary', '#ffffff');
     const checkMark = checked ? '\u2713' : '';
     return `<Frame name={Checkbox_${label.replace(/\\s+/g, '_')}} w={${w}} h={hug} flex={row} gap={10} items={center}>
-  <Frame w={20} h={20} bg={${boxBg}} rounded={4} stroke={${border}} justify={center} items={center}>
+  <Frame w={20} h={20} flex={row} bg={${boxBg}} rounded={4} stroke={${border}} justify={center} items={center}>
     <Text size={12} weight={bold} color={${checkColor}}>${checkMark}</Text>
   </Frame>
   <Text size={14} color={${labelColor}} w={fill}>${label}</Text>
@@ -94,7 +94,7 @@ export function form(fields = [], opts = {}) {
   return `<Frame name={Form_${title.replace(/\\s+/g, '_')}} w={${w}} h={hug} bg={${bg}} flex={col} p={32} gap={20} rounded={16} shadow={0 4 16 rgba(0,0,0,0.06)} stroke={${border}}>
   <Text size={24} weight={bold} color={${titleColor}} w={fill}>${title}</Text>
 ${fieldJsx}
-  <Frame name={Submit} w={fill} h={48} bg={${submitBg}} rounded={12} justify={center} items={center}>
+  <Frame name={Submit} w={fill} h={48} flex={row} bg={${submitBg}} rounded={12} justify={center} items={center}>
     <Text size={16} weight={semibold} color={${submitText}}>${submitLabel}</Text>
   </Frame>
 </Frame>`;

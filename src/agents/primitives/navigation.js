@@ -22,13 +22,13 @@ export const navigation = {
       const itemBg = isActive ? (mode === 'Dark' ? 'bg={#1e3a5f}' : 'bg={#eff6ff}') : '';
       const color = isActive ? (mode === 'Dark' ? '#60a5fa' : '#1d4ed8') : (mode === 'Dark' ? '#94a3b8' : '#6b7280');
       const weight = isActive ? 'semibold' : 'regular';
-      return `  <Frame name={NavItem_${item.replace(/\\s+/g, '_')}} w={fill} h={44} ${itemBg} rounded={8} px={16} items={center}>
+      return `  <Frame name={NavItem_${item.replace(/\\s+/g, '_')}} w={fill} h={44} flex={row} ${itemBg} rounded={8} px={16} items={center}>
     <Text size={14} weight={${weight}} color={${color}} w={fill}>${item}</Text>
   </Frame>`;
     }).join('\n');
 
     return `<Frame name={Sidebar} w={${w}} h={fill} bg={${bg}} flex={col} p={16} gap={4} stroke={${border}}>
-  <Frame name={Logo_Area} w={fill} h={48} px={16} items={center}>
+  <Frame name={Logo_Area} w={fill} h={48} flex={row} px={16} items={center}>
     <Text size={20} weight={bold} color={${titleColor}}>${title}</Text>
   </Frame>
   <Frame name={Nav_Items} w={fill} h={hug} flex={col} gap={4} pt={16}>
@@ -56,12 +56,12 @@ ${navItems}
     const avatarColor = mode === 'Dark' ? '#94a3b8' : '#6b7280';
 
     const searchBlock = showSearch ? `
-    <Frame name={Search} w={280} h={40} bg={${searchBg}} rounded={8} px={14} items={center} stroke={${searchBorder}}>
+    <Frame name={Search} w={280} h={40} flex={row} bg={${searchBg}} rounded={8} px={14} items={center} stroke={${searchBorder}}>
       <Text size={14} color={${searchColor}} w={fill}>Search...</Text>
     </Frame>` : '';
 
     const avatarBlock = showAvatar ? `
-    <Frame name={Avatar} w={36} h={36} bg={${avatarBg}} rounded={18} justify={center} items={center}>
+    <Frame name={Avatar} w={36} h={36} flex={row} bg={${avatarBg}} rounded={18} justify={center} items={center}>
       <Text size={14} weight={semibold} color={${avatarColor}}>JD</Text>
     </Frame>` : '';
 
@@ -88,7 +88,7 @@ ${navItems}
       const color = isActive ? '#3b82f6' : (mode === 'Dark' ? '#94a3b8' : '#6b7280');
       const weight = isActive ? 'semibold' : 'regular';
       const underline = isActive ? `stroke={#3b82f6} strokeWidth={2}` : '';
-      return `  <Frame name={Tab_${tab.replace(/\\s+/g, '_')}} h={44} px={16} justify={center} items={center} ${underline}>
+      return `  <Frame name={Tab_${tab.replace(/\\s+/g, '_')}} h={44} flex={row} px={16} justify={center} items={center} ${underline}>
     <Text size={14} weight={${weight}} color={${color}}>${tab}</Text>
   </Frame>`;
     }).join('\n');

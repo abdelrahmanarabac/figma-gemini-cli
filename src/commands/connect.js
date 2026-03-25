@@ -1,7 +1,7 @@
 import { Command } from '../cli/command.js';
-import { startDaemon, startFigma, isDaemonRunning } from '../utils/figma.js';
+import { startDaemon, startFigma } from '../utils/figma.js';
 import chalk from 'chalk';
-import ora from 'ora';
+import { getDaemonUrl } from '../utils/daemon-config.js';
 
 class ConnectCommand extends Command {
   name = 'connect';
@@ -13,30 +13,44 @@ class ConnectCommand extends Command {
 
   async execute(ctx, opts) {
     const mode = opts.safe ? 'plugin' : 'auto';
-    const spinner = ora('Starting Figma CLI Daemon...').start();
+    const spinner = ctx.startSpinner('Starting Figma CLI Daemon...');
+    const instructions = [
+      'Open Figma Desktop and any design file',
+      'Run FigCli plugin (Plugins -> Development -> FigCli)',
+      'The CLI will connect automatically',
+    ];
 
     try {
       await startDaemon(false, mode);
-      spinner.succeed('Daemon running');
+      if (!ctx.isJson) {
+        spinner.succeed('Daemon running');
+      }
 
       if (mode === 'auto') {
-        ora('Ensuring Figma is running with remote debugging...').start().succeed();
+        if (!ctx.isJson) {
+          ctx.startSpinner('Ensuring Figma is running with remote debugging...').succeed('Ensured Figma launch attempt.');
+        }
         startFigma();
       }
 
-      console.log(chalk.cyan('\n  INSTRUCTIONS:\n'));
-      console.log(chalk.white('  1. Open Figma Desktop and any design file'));
-      console.log(chalk.white('  2. Run FigCli plugin (Plugins -> Development -> FigCli)'));
-      console.log(chalk.white('  3. The CLI will connect automatically\n'));
+      if (!ctx.isJson) {
+        console.log(chalk.cyan('\n  INSTRUCTIONS:\n'));
+        instructions.forEach((line, index) => {
+          console.log(chalk.white(`  ${index + 1}. ${line}`));
+        });
+        console.log();
+      }
 
-      const pluginSpinner = ora('Waiting for plugin connection...').start();
+      const pluginSpinner = ctx.startSpinner('Waiting for plugin connection...');
       
       // Poll for plugin connection
       let pluginConnected = false;
+      let daemonRunning = true;
       for (let i = 0; i < 30; i++) {
         try {
-          const res = await fetch('http://127.0.0.1:3456/health');
+          const res = await fetch(`${getDaemonUrl()}/health`);
           const data = await res.json();
+          daemonRunning = data.status === 'ok';
           if (data.plugin) {
             pluginConnected = true;
             break;
@@ -45,15 +59,40 @@ class ConnectCommand extends Command {
         await new Promise(r => setTimeout(r, 1000));
       }
 
+      const payload = {
+        mode,
+        daemonRunning,
+        pluginConnected,
+        instructions,
+      };
+
       if (pluginConnected) {
-        pluginSpinner.succeed('Plugin connected!');
-        console.log(chalk.green('\n  [OK] Ready!\n'));
+        if (ctx.isJson) {
+          ctx.logSuccess('Connected to Figma.', payload);
+        } else {
+          pluginSpinner.succeed('Plugin connected!');
+          console.log(chalk.green('\n  [OK] Ready!\n'));
+        }
       } else {
-        pluginSpinner.warn('Plugin connection timeout.');
-        console.log(chalk.yellow('\n  Ensure FigCli plugin is open in Figma.'));
+        process.exitCode = 1;
+        if (ctx.isJson) {
+          ctx.logError('Plugin connection timeout.', {
+            ...payload,
+            error: 'Plugin connection timeout.',
+          });
+        } else {
+          pluginSpinner.warn('Plugin connection timeout.');
+          console.log(chalk.yellow('\n  Ensure FigCli plugin is open in Figma.'));
+        }
       }
     } catch (err) {
-      spinner.fail('Connection failed: ' + err.message);
+      process.exitCode = 1;
+      spinner.fail(`Connection failed: ${err.message}`, {
+        mode,
+        daemonRunning: false,
+        pluginConnected: false,
+        error: err.message,
+      });
     }
   }
 }

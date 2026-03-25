@@ -4,24 +4,25 @@ import ora from 'ora';
 
 class AuditA11yCommand extends Command {
   name = 'audit a11y';
-  description = 'Perform an autonomous accessibility audit for color contrast failures';
+  description = 'Perform a contrast accessibility audit for the current page or entire document';
   needsConnection = true;
 
   constructor() {
     super();
     this.options = [
       { flags: '--page', description: 'Audit all nodes in the current page' },
-      { flags: '--all', description: 'Audit all nodes in the document' },
-      { flags: '--fix', description: 'Attempt to automatically fix low contrast' }
+      { flags: '--all', description: 'Audit all nodes in the document' }
     ];
   }
 
   async execute(ctx, options) {
-    const spinner = ora('Analyzing canvas for A11y failures...').start();
+    const spinner = ctx.isInteractive ? ora('Analyzing canvas for A11y failures...').start() : null;
     
     try {
+      const scope = options.all ? 'all' : 'page';
       const code = `
-        const options = ${JSON.stringify(options)};
+        const scope = ${JSON.stringify(scope)};
+        const WHITE = { r: 255, g: 255, b: 255, hex: '#ffffff' };
         
         function getLuminance(r, g, b) {
           const a = [r, g, b].map(v => {
@@ -37,76 +38,128 @@ class AuditA11yCommand extends Command {
           return l1 > l2 ? l1 / l2 : l2 / l1;
         }
 
-        function hexToRgb(hex) {
-          if (!hex || typeof hex !== 'string') return { r: 0, g: 0, b: 0 };
-          const result = /^#?([a-f\\d]{2})([a-f\\d]{2})([a-f\\d]{2})$/i.exec(hex);
-          return result ? {
-            r: parseInt(result[1], 16),
-            g: parseInt(result[2], 16),
-            b: parseInt(result[3], 16)
-          } : { r: 0, g: 0, b: 0 };
+        function toHex(value) {
+          return Math.round(value).toString(16).padStart(2, '0');
+        }
+
+        function isSolidPaint(paint) {
+          return !!paint && paint.type === 'SOLID' && !!paint.color;
+        }
+
+        function toRgb(color, opacity) {
+          const r = Math.round(color.r * 255);
+          const g = Math.round(color.g * 255);
+          const b = Math.round(color.b * 255);
+          return {
+            r,
+            g,
+            b,
+            opacity: opacity === undefined ? 1 : opacity,
+            hex: '#' + toHex(r) + toHex(g) + toHex(b),
+          };
+        }
+
+        function getSolidFill(node) {
+          if (!node || !('fills' in node)) return null;
+          if (!Array.isArray(node.fills)) return null;
+          const solid = node.fills.find(paint => paint.visible !== false && isSolidPaint(paint));
+          if (!solid) return null;
+          return toRgb(solid.color, solid.opacity);
         }
 
         function getParentBg(node) {
           let parent = node.parent;
           while (parent) {
-            if (parent.fills && parent.fills.length > 0 && parent.fills[0].type === 'SOLID') {
-              const f = parent.fills[0].color;
-              return { r: f.r * 255, g: f.g * 255, b: f.b * 255, hex: '#' + 
-                Math.round(f.r*255).toString(16).padStart(2, '0') + 
-                Math.round(f.g*255).toString(16).padStart(2, '0') + 
-                Math.round(f.b*255).toString(16).padStart(2, '0')
-              };
-            }
+            const fill = getSolidFill(parent);
+            if (fill) return fill;
             parent = parent.parent;
           }
-          return { r: 255, g: 255, b: 255, hex: '#ffffff' }; // Default to White
+          return WHITE;
         }
 
-        const textNodes = figma.currentPage.findAll(n => n.type === 'TEXT');
-        const results = [];
+        function getThreshold(node) {
+          const fontSize = typeof node.fontSize === 'number' ? node.fontSize : 14;
+          const fontStyle = node.fontName && node.fontName !== figma.mixed ? String(node.fontName.style || '') : '';
+          const isLargeText = fontSize >= 18 || (fontSize >= 14 && /bold/i.test(fontStyle));
+          return isLargeText ? 3 : 4.5;
+        }
 
-        for (const textNode of textNodes) {
-          if (!textNode.fills || textNode.fills.length === 0 || textNode.fills[0].type !== 'SOLID') continue;
-          
-          const f = textNode.fills[0].color;
-          const textRgb = { r: f.r * 255, g: f.g * 255, b: f.b * 255 };
-          const bgRgb = getParentBg(textNode);
-          const ratio = getContrast(textRgb, bgRgb);
+        const roots = scope === 'all' && Array.isArray(figma.root.children) && figma.root.children.length > 0
+          ? figma.root.children
+          : [figma.currentPage];
 
-          if (ratio < 4.5) {
-            results.push({
-              id: textNode.id,
-              name: textNode.name,
-              text: textNode.characters,
-              ratio: ratio.toFixed(2),
-              textColor: '#' + Math.round(f.r*255).toString(16).padStart(2, '0') + Math.round(f.g*255).toString(16).padStart(2, '0') + Math.round(f.b*255).toString(16).padStart(2, '0'),
-              bgHex: bgRgb.hex
-            });
+        const failures = [];
+        let scanned = 0;
+
+        for (const root of roots) {
+          if (!root || typeof root.findAll !== 'function') continue;
+          const textNodes = root.findAll(node => node.type === 'TEXT');
+
+          for (const textNode of textNodes) {
+            scanned++;
+            if (!textNode.visible || !textNode.characters) continue;
+
+            const textRgb = getSolidFill(textNode);
+            if (!textRgb) continue;
+
+            const bgRgb = getParentBg(textNode);
+            const ratio = getContrast(textRgb, bgRgb);
+            const threshold = getThreshold(textNode);
+
+            if (ratio < threshold) {
+              failures.push({
+                id: textNode.id,
+                page: root.name || 'Untitled Page',
+                name: textNode.name,
+                text: textNode.characters,
+                ratio: ratio.toFixed(2),
+                threshold,
+                textColor: textRgb.hex,
+                bgHex: bgRgb.hex
+              });
+            }
           }
         }
 
-        return results;
+        return { scope, scanned, failures };
       `;
 
-      const failures = await ctx.eval(code);
-      spinner.stop();
+      const audit = await ctx.eval(code);
+      spinner?.stop();
 
-      if (failures && failures.length > 0) {
-        ctx.logError(`Found ${failures.length} Accessibility Failures:`);
-        console.log('');
-        failures.forEach(f => {
-          console.log(chalk.red(`  [FAILED] ${chalk.bold(f.name)}`));
-          console.log(chalk.gray(`    Text: "${f.text.substring(0, 30)}${f.text.length > 30 ? '...' : ''}"`));
-          console.log(chalk.gray(`    Ratio: ${f.ratio}:1 (WCAG Target: 4.5:1)`));
-          console.log(chalk.gray(`    Colors: ${f.textColor} on ${f.bgHex}`));
+      const failures = audit?.failures || [];
+      const scanned = audit?.scanned || 0;
+      const scopeLabel = (audit?.scope || scope) === 'all' ? 'document' : 'current page';
+      const payload = {
+        scope: audit?.scope || scope,
+        scopeLabel,
+        scanned,
+        failureCount: failures.length,
+        failures,
+        pass: failures.length === 0,
+      };
+
+      if (failures.length > 0) {
+        process.exitCode = 1;
+        ctx.output(payload, () => {
+          ctx.logError(`Found ${failures.length} accessibility failure(s) in the ${scopeLabel}.`);
           console.log('');
+          failures.forEach(f => {
+            console.log(chalk.red(`  [FAILED] ${chalk.bold(f.name)}`));
+            console.log(chalk.gray(`    Page: ${f.page}`));
+            console.log(chalk.gray(`    Text: "${f.text.substring(0, 30)}${f.text.length > 30 ? '...' : ''}"`));
+            console.log(chalk.gray(`    Ratio: ${f.ratio}:1 (WCAG Target: ${f.threshold}:1)`));
+            console.log(chalk.gray(`    Colors: ${f.textColor} on ${f.bgHex}`));
+            console.log('');
+          });
         });
       } else {
-        ctx.logSuccess('Accessibility Audit Complete: 100% Contrast Pass!');
+        ctx.output(payload, () => {
+          ctx.logSuccess(`Accessibility audit complete for the ${scopeLabel}: scanned ${scanned} text node(s), no contrast failures found.`);
+        });
       }
     } catch (err) {
-      spinner.fail('Audit failed');
+      spinner?.fail('Audit failed');
       ctx.logError(err.message);
     }
   }

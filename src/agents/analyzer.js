@@ -16,6 +16,7 @@ export class AnalyzerExpert extends Expert {
 
   relevance(intent) {
     if (intent.action === 'audit' || intent.action === 'inspect' || intent.action === 'get') return 0.95;
+    if (intent.action === 'find') return 0.8;
     if (intent.tags.includes('validation')) return 0.8;
     // Moderate relevance for generate — gathers context first
     if (intent.action === 'generate') return 0.4;
@@ -103,8 +104,8 @@ export class AnalyzerExpert extends Expert {
     let commands = pipelineData.commands || [];
     
     // If no commands but we have an ID or intent, try to fetch the node context
-    if (commands.length === 0 && (pipelineData.intent?.action === 'get' || pipelineData.intent?.action === 'inspect')) {
-      const id = pipelineData.id || (pipelineData.intent.raw.match(/get\s+([^\s]+)/i)?.[1]) || 'selected';
+    if (commands.length === 0 && ['get', 'inspect'].includes(pipelineData.intent?.action)) {
+      const id = pipelineData.id || (pipelineData.intent.raw.match(/(?:get|inspect)\s+([^\s]+)/i)?.[1]) || 'selected';
       try {
         const { sendCommand } = await import('../transport/bridge.js');
         const result = await sendCommand('node.inspect', { id: id === 'selected' ? undefined : id });

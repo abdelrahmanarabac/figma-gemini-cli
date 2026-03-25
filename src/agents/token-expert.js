@@ -6,6 +6,7 @@
  */
 
 import { Expert } from './expert.js';
+import { buildTokenCatalogFromInventory } from './workflow-planner.js';
 
 // ── Default Token Templates ─────────────────────────
 
@@ -126,9 +127,38 @@ export class TokenExpert extends Expert {
     };
   }
 
+  mergeTokenSets(base = {}, incoming = {}) {
+    return {
+      semantic: { ...(base.semantic || {}), ...(incoming.semantic || {}) },
+      spacing: { ...(base.spacing || {}), ...(incoming.spacing || {}) },
+      radius: { ...(base.radius || {}), ...(incoming.radius || {}) },
+      typography: { ...(base.typography || {}), ...(incoming.typography || {}) },
+      component: { ...(base.component || {}), ...(incoming.component || {}) },
+      primitives: { ...(base.primitives || {}), ...(incoming.primitives || {}) },
+    };
+  }
+
   async execute(ctx, task, pipelineData = {}) {
     const warnings = [];
     const recommendations = [];
+    const preferences = pipelineData.preferences || {};
+    const inventory = pipelineData.inventory || {};
+    const inventoryCatalog = inventory.tokenCatalog || buildTokenCatalogFromInventory(inventory);
+    const hasInventoryTokens = Object.values(inventoryCatalog).some(group => Object.keys(group || {}).length > 0);
+    let tokens = {};
+    let tokenStrategy = 'raw-fallback';
+
+    if (preferences.useExistingTokens && hasInventoryTokens) {
+      tokens = preferences.createMissingTokens
+        ? this.mergeTokenSets(this.getDefaultTokenSet(), inventoryCatalog)
+        : inventoryCatalog;
+      tokenStrategy = preferences.createMissingTokens ? 'hybrid-existing-plus-generated' : 'existing-only';
+      warnings.push(`Token strategy: ${tokenStrategy}`);
+    } else if (preferences.createMissingTokens) {
+      tokens = this.getDefaultTokenSet();
+      tokenStrategy = 'generated';
+      warnings.push('Token strategy: generated scaffolds for missing design tokens');
+    }
 
     // Scan commands for raw color values that could be tokens
     const commands = pipelineData.commands || [];
@@ -154,8 +184,9 @@ export class TokenExpert extends Expert {
     return {
       success: true,
       data: {
-        tokens: this.getDefaultTokenSet(),
+        tokens,
         recommendations,
+        tokenStrategy,
       },
       metadata: { scannedCommands: commands.length, recommendations: recommendations.length },
       warnings,

@@ -1,6 +1,5 @@
 import { Command } from '../cli/command.js';
 import chalk from 'chalk';
-import ora from 'ora';
 
 class ResponsiveCommand extends Command {
   name = 'responsive <target>';
@@ -16,7 +15,7 @@ class ResponsiveCommand extends Command {
   }
 
   async execute(ctx, options, target) {
-    const spinner = ora(`Locating target "${target}"...`).start();
+    const spinner = ctx.startSpinner(`Locating target "${target}"...`);
     
     try {
       // 1. Resolve target ID
@@ -27,36 +26,69 @@ class ResponsiveCommand extends Command {
       }
 
       if (!targetId) {
-        spinner.fail(`Target component "${target}" not found.`);
+        process.exitCode = 1;
+        spinner.fail(`Target component "${target}" not found.`, {
+          success: false,
+          target,
+          error: 'Target component not found.',
+        });
         return;
       }
 
       // 2. Parse breakpoints
       const breakpoints = options.breakpoints.split(',').map(n => parseInt(n.trim(), 10)).filter(n => !isNaN(n));
+      if (breakpoints.length === 0) {
+        process.exitCode = 1;
+        spinner.fail('No valid breakpoints were provided.', {
+          success: false,
+          target,
+          error: 'No valid breakpoints were provided.',
+        });
+        return;
+      }
       
       spinner.text = `Generating ${breakpoints.length} responsive clones...`;
 
       // 3. Send responsive command
-      const { sendCommand } = await import('../transport/bridge.js');
-      const result = await sendCommand('node.responsive', {
+      const result = await ctx.command('node.responsive', {
         id: targetId,
         breakpoints: breakpoints,
         gap: parseInt(options.gap, 10)
       });
-
-      spinner.stop();
+      const payload = {
+        success: result?.data?.status === 'responsive_complete',
+        target,
+        targetId,
+        breakpoints,
+        gap: parseInt(options.gap, 10),
+        count: result?.data?.count || 0,
+        nodes: result?.data?.nodes || [],
+      };
 
       if (result && result.data && result.data.status === 'responsive_complete') {
-        ctx.logSuccess(`Successfully generated ${result.data.count} responsive variants for "${target}"`);
-        result.data.nodes.forEach(n => {
-          console.log(chalk.gray(`   ˘ Created: ${n.name} (ID: ${n.id})`));
-        });
+        if (ctx.isJson) {
+          ctx.logSuccess(`Successfully generated ${result.data.count} responsive variants for "${target}"`, payload);
+        } else {
+          spinner.succeed(`Successfully generated ${result.data.count} responsive variants for "${target}"`);
+          result.data.nodes.forEach(n => {
+            console.log(chalk.gray(`   Created: ${n.name} (ID: ${n.id})`));
+          });
+        }
       } else {
-        ctx.logError(`Responsive generation failed: ${result.error || 'Unknown error'}`);
+        process.exitCode = 1;
+        spinner.fail(`Responsive generation failed: ${result.error || 'Unknown error'}`, {
+          ...payload,
+          success: false,
+          error: result?.error || 'Unknown error',
+        });
       }
     } catch (err) {
-      spinner.fail('Responsive error');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Responsive error', {
+        success: false,
+        target,
+        error: err.message,
+      });
     }
   }
 }

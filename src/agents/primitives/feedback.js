@@ -20,17 +20,17 @@ export const feedback = {
     const confirmBg = resolveToken(tokens, 'semantic', 'color/primary', '#3b82f6');
     const confirmColor = resolveToken(tokens, 'semantic', 'color/on-primary', '#ffffff');
 
-    return `<Frame name={Modal_Overlay} w={800} h={600} bg={${overlayColor}} justify={center} items={center}>
+    return `<Frame name={Modal_Overlay} w={800} h={600} flex={row} bg={${overlayColor}} justify={center} items={center}>
   <Frame name={Modal} w={${w}} h={hug} bg={${bg}} flex={col} p={32} gap={24} rounded={16} shadow={0 24 48 rgba(0,0,0,0.12)}>
     <Frame flex={col} gap={8} w={fill} h={hug}>
       <Text size={20} weight={semibold} color={${titleColor}} w={fill}>${title}</Text>
       <Text size={14} color={${descColor}} w={fill}>${description}</Text>
     </Frame>
     <Frame flex={row} gap={12} w={fill} h={hug} justify={end}>
-      <Frame name={Cancel} w={hug} h={44} bg={${cancelBg}} rounded={10} px={20} py={12} justify={center} items={center}>
+      <Frame name={Cancel} w={hug} h={44} flex={row} bg={${cancelBg}} rounded={10} px={20} py={12} justify={center} items={center}>
         <Text size={14} weight={semibold} color={${cancelColor}}>${cancelLabel}</Text>
       </Frame>
-      <Frame name={Confirm} w={hug} h={44} bg={${confirmBg}} rounded={10} px={20} py={12} justify={center} items={center}>
+      <Frame name={Confirm} w={hug} h={44} flex={row} bg={${confirmBg}} rounded={10} px={20} py={12} justify={center} items={center}>
         <Text size={14} weight={semibold} color={${confirmColor}}>${confirmLabel}</Text>
       </Frame>
     </Frame>

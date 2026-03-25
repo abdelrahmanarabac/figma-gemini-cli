@@ -8,6 +8,7 @@
  */
 
 import { Expert } from './expert.js';
+import { findBestReusableComponent } from './workflow-planner.js';
 import {
   buttons, matchButtonVariant,
   cards, matchCardType,
@@ -80,11 +81,15 @@ export class BuilderExpert extends Expert {
     const matched = [];
 
     for (const pattern of COMPONENT_PATTERNS) {
+      if (pattern.type === 'card' && matched.some(m => m.category === 'card' && m.type !== 'card')) {
+        continue;
+      }
+
       const matchRegex = new RegExp(`(?:\\b(\\d+)\\s+)?${pattern.match.source}`, 'i');
       const m = lower.match(matchRegex);
       
       if (m) {
-        const count = m[1] ? parseInt(m[1], 10) : 1;
+        const count = this._resolveMatchCount(pattern.type, description, m);
 
         // Detect variant
         let variant = null;
@@ -118,6 +123,20 @@ export class BuilderExpert extends Expert {
   renderPrimitive(match, context = {}, index = 0) {
     const { mode = 'Light', copy = {}, icons = {}, tokens } = context;
     const opts = { mode, tokens };
+    const reusableComponent = context.preferences?.useExistingComponents
+      ? findBestReusableComponent(match, context.components || [])
+      : null;
+
+    if (reusableComponent) {
+      context.reuseLog = context.reuseLog || [];
+      context.reuseLog.push({
+        matchType: match.type,
+        matchVariant: match.variant || null,
+        componentId: reusableComponent.id,
+        componentName: reusableComponent.name,
+      });
+      return `<Instance name="${reusableComponent.name.replace(/"/g, '\\"')}" componentId="${reusableComponent.id}" />`;
+    }
 
     switch (match.type) {
       case 'button':
@@ -134,8 +153,9 @@ export class BuilderExpert extends Expert {
         });
 
       case 'pricing': {
-        const tierNames = copy.labels || ['Basic', 'Pro', 'Enterprise'];
+        const tierNames = copy.tierNames || ['Basic', 'Pro', 'Enterprise'];
         const prices = copy.prices || ['\\`$9', '\\`$29', 'Custom'];
+        const ctaLabels = copy.ctaLabels || ['Start free', 'Upgrade to Pro', 'Contact sales'];
         const name = tierNames[index] || `Tier ${index + 1}`;
         const price = prices[index] || '\\`$0';
         return cards.pricing({
@@ -143,6 +163,7 @@ export class BuilderExpert extends Expert {
           price,
           primary: index === 1,
           features: copy.features?.[index] || ['Feature 1', 'Feature 2', 'Feature 3'],
+          ctaLabel: ctaLabels[index] || 'Get Started',
           ...opts,
         });
       }
@@ -242,14 +263,6 @@ export class BuilderExpert extends Expert {
           ...opts,
         });
 
-      case 'pricing':
-        return cards.pricing({
-          tier: copy.title || 'Basic',
-          price: '$9',
-          features: copy.labels || ['Feature 1', 'Feature 2', 'Feature 3'],
-          ...opts,
-        });
-
       default:
         return cards.basic({
           title: copy.title || match.type,
@@ -262,8 +275,7 @@ export class BuilderExpert extends Expert {
   buildFromDescription(description, context = {}) {
     const matched = this.matchComponents(description);
     const layoutInfo = inferLayout(description, this._totalCount(matched));
-
-    console.log('[DEBUG] matched components:', JSON.stringify(matched, null, 2));
+    context.reuseLog = [];
 
     // Expand matched components into individual JSX elements.
     // However, if the layout naturally provides certain scaffolds (like dashboard provides sidebar/header),
@@ -279,11 +291,9 @@ export class BuilderExpert extends Expert {
       }
     }
 
-    console.log(`[DEBUG] builder elements generated: ${elements.length}`);
-
     // Apply layout
     const jsx = this._applyLayout(layoutInfo, matched, elements, context);
-    return { jsx, templateUsed: layoutInfo.type };
+    return { jsx, templateUsed: layoutInfo.type, reusedComponents: context.reuseLog || [] };
   }
 
   /** @private */
@@ -373,6 +383,28 @@ export class BuilderExpert extends Expert {
     return 'Form';
   }
 
+  /** @private */
+  _resolveMatchCount(type, description, match) {
+    if (match[1]) {
+      return parseInt(match[1], 10);
+    }
+
+    const countPatterns = {
+      pricing: /(\d+)\s*(tiers?|plans?|subscriptions?)/i,
+      stat_card: /(\d+)\s*(stats?|metrics?|kpis?|cards?)/i,
+      card: /(\d+)\s*(cards?|tiles?|panels?)/i,
+      button: /(\d+)\s*(buttons?|ctas?)/i,
+      input: /(\d+)\s*(inputs?|fields?)/i,
+    };
+
+    const countMatch = countPatterns[type]?.exec(description);
+    if (countMatch) {
+      return parseInt(countMatch[1], 10);
+    }
+
+    return 1;
+  }
+
   async execute(ctx, task, pipelineData = {}) {
     const description = task.description || task.input?.intent?.raw || '';
 
@@ -385,16 +417,21 @@ export class BuilderExpert extends Expert {
       description,
     };
 
-    const { jsx, templateUsed } = this.buildFromDescription(description, context);
+    context.components = pipelineData.inventory?.components || [];
+    context.preferences = pipelineData.preferences || {};
+
+    const { jsx, templateUsed, reusedComponents } = this.buildFromDescription(description, context);
 
     // Parse JSX to commands
     let commands = [];
     let parseErrors = [];
+    let diagnostics = [];
     try {
-      const { parseJSX } = await import('../parser/jsx.js');
-      const result = parseJSX(jsx);
+      const { compileJSX } = await import('../parser/jsx.js');
+      const result = compileJSX(jsx);
       commands = result.commands;
       parseErrors = result.errors;
+      diagnostics = result.diagnostics || [];
     } catch (err) {
       return {
         success: false,
@@ -405,12 +442,17 @@ export class BuilderExpert extends Expert {
       };
     }
 
+    const blockingDiagnostics = diagnostics.filter(diagnostic => diagnostic.severity === 'error');
+
     return {
-      success: commands.length > 0,
-      data: { jsx, commands, templateUsed },
-      metadata: { templateUsed, commandCount: commands.length },
+      success: commands.length > 0 && blockingDiagnostics.length === 0,
+      data: { jsx, commands, templateUsed, diagnostics, reusedComponents },
+      metadata: { templateUsed, commandCount: commands.length, diagnosticCount: diagnostics.length, reusedComponents: reusedComponents.length },
       warnings: parseErrors.length > 0 ? [`Parser warnings: ${parseErrors.join('; ')}`] : [],
-      errors: commands.length === 0 ? ['No commands generated from JSX'] : [],
+      errors: [
+        ...(commands.length === 0 ? ['No commands generated from JSX'] : []),
+        ...blockingDiagnostics.map(diagnostic => `[${diagnostic.code}] ${diagnostic.message}`),
+      ],
     };
   }
 }

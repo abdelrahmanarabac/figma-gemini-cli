@@ -6,6 +6,7 @@ import chalk from 'chalk';
 import { CommandContext } from './context.js';
 import { Command } from './command.js';
 import { detectAndDocumentError } from '../utils/error-memory.js';
+import { checkHealth } from '../transport/bridge.js';
 
 export class CliRouter {
   /**
@@ -154,18 +155,23 @@ export class CliRouter {
    * @returns {Promise<boolean>}
    */
   async _ensureConnection(ctx) {
-    try {
-      const res = await fetch(`http://127.0.0.1:3456/health`, { signal: AbortSignal.timeout(2000) });
-      const data = await res.json();
-      if (data.status === 'ok' && data.plugin) {
-        return true;
-      }
-    } catch { }
+    const data = await checkHealth();
+    if (data.status === 'ok' && data.plugin) {
+      return true;
+    }
 
-    // Not connected â€” show helpful message but don't force exit here if we can handle it
-    console.log(chalk.red('\nâś— Not connected to Figma\n'));
-    console.log(chalk.white('  Ensure the FigCli plugin is open in Figma and run:'));
-    console.log(chalk.cyan('  figma-gemini-cli connect\n'));
+    const payload = {
+      connected: false,
+      daemonRunning: data.status === 'ok',
+      pluginConnected: Boolean(data.plugin),
+      message: 'Not connected to Figma. Ensure the FigCli plugin is open and run "figma-gemini-cli connect".',
+    };
+
+    ctx.output(payload, () => {
+      console.log(chalk.red('\n[X] Not connected to Figma\n'));
+      console.log(chalk.white('  Ensure the FigCli plugin is open in Figma and run:'));
+      console.log(chalk.cyan('  figma-gemini-cli connect\n'));
+    });
     return false;
   }
 

@@ -10,7 +10,7 @@ export const dataDisplay = {
     const { text = 'Active', color = '#22c55e', mode = 'Light', tokens } = opts;
     const resolvedColor = resolveToken(tokens, 'semantic', 'color/success', color);
     const bgAlpha = mode === 'Dark' ? '20' : '15';
-    return `<Frame name={Badge_${text.replace(/\\s+/g, '_')}} h={24} bg={${resolvedColor}${bgAlpha}} rounded={6} px={10} py={4} items={center}>
+    return `<Frame name={Badge_${text.replace(/\\s+/g, '_')}} h={24} flex={row} bg={${resolvedColor}${bgAlpha}} rounded={6} px={10} py={4} items={center}>
   <Text size={12} weight={semibold} color={${resolvedColor}}>${text}</Text>
 </Frame>`;
   },
@@ -21,7 +21,7 @@ export const dataDisplay = {
     const color = mode === 'Dark' ? '#94a3b8' : resolveToken(tokens, 'semantic', 'color/on-surface-muted', '#6b7280');
     const initials = name.split(' ').map(n => n[0] || '').join('').toUpperCase().slice(0, 2);
     const fontSize = Math.round(size * 0.38);
-    return `<Frame name={Avatar_${initials}} w={${size}} h={${size}} bg={${bg}} rounded={${Math.round(size / 2)}} justify={center} items={center}>
+    return `<Frame name={Avatar_${initials}} w={${size}} h={${size}} flex={row} bg={${bg}} rounded={${Math.round(size / 2)}} justify={center} items={center}>
   <Text size={${fontSize}} weight={semibold} color={${color}}>${initials}</Text>
 </Frame>`;
   },

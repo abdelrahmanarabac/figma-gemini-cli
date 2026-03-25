@@ -1,7 +1,5 @@
 import { Command } from '../cli/command.js';
 import { readFileSync } from 'fs';
-import chalk from 'chalk';
-import ora from 'ora';
 
 class TokensW3CImportCommand extends Command {
   name = 'tokens w3c import <file>';
@@ -16,7 +14,7 @@ class TokensW3CImportCommand extends Command {
   }
 
   async execute(ctx, options, file) {
-    const spinner = ora(`Importing W3C tokens from ${file}...`).start();
+    const spinner = ctx.startSpinner(`Importing W3C tokens from ${file}...`);
     try {
       const tokens = JSON.parse(readFileSync(file, 'utf8'));
       
@@ -75,10 +73,25 @@ class TokensW3CImportCommand extends Command {
       `;
 
       const result = await ctx.eval(code);
-      spinner.succeed(`Successfully imported ${result.created} W3C tokens into "${options.collection}"`);
+      const payload = {
+        success: true,
+        file,
+        collection: options.collection,
+        created: result.created,
+      };
+      if (ctx.isJson) {
+        ctx.logSuccess(`Successfully imported ${result.created} W3C tokens into "${options.collection}"`, payload);
+      } else {
+        spinner.succeed(`Successfully imported ${result.created} W3C tokens into "${options.collection}"`);
+      }
     } catch (err) {
-      spinner.fail('W3C Import failed');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('W3C Import failed', {
+        success: false,
+        file,
+        collection: options.collection,
+        error: err.message,
+      });
     }
   }
 }

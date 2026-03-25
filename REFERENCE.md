@@ -22,13 +22,13 @@ node src/index.js status         # check connection
 
 ## 2. MoE Generation Pipeline
 
-### `generate <description>` — AI-Powered UI Synthesis
+### `generate <description>` — MoE UI Synthesis
 Routes through **all 8 experts**: Orchestrator parses intent → TokenExpert ensures tokens → Builder selects template → UXWriter provides copy → Visual matches icons → Guardian validates → A11y checks contrast → Responsive analyzes breakpoints.
 
 | Flag | Effect |
 |---|---|
 | `--verbose` / `-v` | Print full pipeline trace (expert scores, decisions, timing) |
-| `--dry-run` | Execute pipeline without rendering to Figma |
+| `--dry-run` | Execute pipeline without requiring a live Figma render |
 | `--mode <mode>` | Theme mode: `Light` or `Dark` (default: Light) |
 
 ```powershell
@@ -41,6 +41,8 @@ node src/index.js generate "A stat card showing `$12,500 revenue with +12% growt
 # Dry-run — inspect pipeline output without rendering
 node src/index.js generate "A pricing page with 3 tiers" --dry-run
 ```
+
+When Guardian reports errors, generation stops before render and exits non-zero.
 
 **Pipeline trace output:**
 ```
@@ -78,7 +80,7 @@ Guardian middleware validates **every render** before committing to canvas.
 |---|---|
 | `--code <jsx>` / `-c` | Inline JSX string |
 | `--file <path>` / `-f` | Read JSX from file |
-| `--dry-run` | Parse + Guardian validate, no render |
+| `--dry-run` | Parse + Guardian validate, no live Figma connection required |
 | `--verbose` | Show Guardian warnings in detail |
 
 ```powershell
@@ -90,6 +92,8 @@ node src/index.js render --code "<Frame w={320} h={180} bg={#ffffff} flex={col} 
 # Dry-run with Guardian report
 node src/index.js render --dry-run --code "<Frame w={400} h={300} bg={#fff} p={24}><Text>Hello</Text></Frame>"
 ```
+
+If Guardian finds blocking errors during a real render, the command exits before sending anything to Figma.
 
 **Guardian validation output:**
 ```
@@ -215,9 +219,14 @@ node src/index.js proto link {Button} {Target_Frame} --trigger {ON_CLICK} --tran
 ## 8. Auditing (A11y Expert Domain)
 
 ```powershell
-# Accessibility audit — contrast failures, touch targets
+# Accessibility audit for the current page
 node src/index.js audit a11y --page
+
+# Accessibility audit for every loaded page in the document
+node src/index.js audit a11y --all
 ```
+
+This audit is currently read-only and focuses on text contrast failures.
 
 ---
 
@@ -261,12 +270,9 @@ node src/index.js hydrate {data.json} {Card_Component} --clone
 
 ---
 
-## 13. FigJam
+## 13. FigJam Status
 
-```powershell
-node src/index.js fj pages
-node src/index.js fj sticky {Meeting Note} -x {100} -y {100} --color {#FEF08A}
-```
+FigJam commands are currently hidden from the CLI until their backing client is implemented.
 
 ---
 

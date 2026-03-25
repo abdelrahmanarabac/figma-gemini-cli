@@ -1,6 +1,5 @@
 import { Command } from '../cli/command.js';
 import chalk from 'chalk';
-import ora from 'ora';
 
 class ModeAddCommand extends Command {
   name = 'mode add <collectionName> <modeName>';
@@ -8,7 +7,7 @@ class ModeAddCommand extends Command {
   needsConnection = true;
 
   async execute(ctx, options, collectionName, modeName) {
-    const spinner = ora(`Adding mode "${modeName}" to "${collectionName}"...`).start();
+    const spinner = ctx.startSpinner(`Adding mode "${modeName}" to "${collectionName}"...`);
     try {
       const code = `
         const colName = ${JSON.stringify(collectionName)};
@@ -28,16 +27,36 @@ class ModeAddCommand extends Command {
       `;
       
       const result = await ctx.eval(code);
-      spinner.stop();
       
       if (result.success) {
-        ctx.logSuccess(`Added mode "${modeName}" to "${result.colName}"`);
+        const payload = {
+          success: true,
+          collection: result.colName,
+          modeName,
+          modeId: result.modeId,
+        };
+        if (ctx.isJson) {
+          ctx.logSuccess(`Added mode "${modeName}" to "${result.colName}"`, payload);
+        } else {
+          spinner.succeed(`Added mode "${modeName}" to "${result.colName}"`);
+        }
       } else {
-        ctx.logError(result.error);
+        process.exitCode = 1;
+        spinner.fail(result.error, {
+          success: false,
+          collection: collectionName,
+          modeName,
+          error: result.error,
+        });
       }
     } catch (err) {
-      spinner.fail('Failed to add mode');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Failed to add mode', {
+        success: false,
+        collection: collectionName,
+        modeName,
+        error: err.message,
+      });
     }
   }
 }
@@ -48,7 +67,7 @@ class ModeEditCommand extends Command {
   needsConnection = true;
 
   async execute(ctx, options, collectionName, oldName, newName) {
-    const spinner = ora(`Renaming mode "${oldName}" to "${newName}"...`).start();
+    const spinner = ctx.startSpinner(`Renaming mode "${oldName}" to "${newName}"...`);
     try {
       const code = `
         const colName = ${JSON.stringify(collectionName)};
@@ -68,16 +87,38 @@ class ModeEditCommand extends Command {
       `;
       
       const result = await ctx.eval(code);
-      spinner.stop();
       
       if (result.success) {
-        ctx.logSuccess(`Renamed mode "${oldName}" to "${newName}" in "${result.colName}"`);
+        const payload = {
+          success: true,
+          collection: result.colName,
+          oldName,
+          newName,
+        };
+        if (ctx.isJson) {
+          ctx.logSuccess(`Renamed mode "${oldName}" to "${newName}" in "${result.colName}"`, payload);
+        } else {
+          spinner.succeed(`Renamed mode "${oldName}" to "${newName}" in "${result.colName}"`);
+        }
       } else {
-        ctx.logError(result.error);
+        process.exitCode = 1;
+        spinner.fail(result.error, {
+          success: false,
+          collection: collectionName,
+          oldName,
+          newName,
+          error: result.error,
+        });
       }
     } catch (err) {
-      spinner.fail('Failed to edit mode');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Failed to edit mode', {
+        success: false,
+        collection: collectionName,
+        oldName,
+        newName,
+        error: err.message,
+      });
     }
   }
 }
@@ -99,7 +140,7 @@ class ModeMultiCommand extends Command {
   }
 
   async execute(ctx, options, collectionName) {
-    const spinner = ora(`Running multi-mode generation: ${options.from} -> ${options.to} (${options.strategy})...`).start();
+    const spinner = ctx.startSpinner(`Running multi-mode generation: ${options.from} -> ${options.to} (${options.strategy})...`);
     try {
       const code = `
         const colName = ${JSON.stringify(collectionName)};
@@ -206,17 +247,45 @@ class ModeMultiCommand extends Command {
       `;
       
       const result = await ctx.eval(code);
-      spinner.stop();
       
       if (result.success) {
-        ctx.logSuccess(`Successfully generated "${result.targetModeName}" using strategy "${options.strategy}" in "${result.colName}"`);
-        console.log(chalk.gray(`    Variables updated: ${result.count}`));
+        const payload = {
+          success: true,
+          collection: result.colName,
+          from: options.from,
+          to: result.targetModeName,
+          strategy: options.strategy,
+          factor: parseFloat(options.factor),
+          filter: options.filter || null,
+          count: result.count,
+        };
+        if (ctx.isJson) {
+          ctx.logSuccess(`Successfully generated "${result.targetModeName}" using strategy "${options.strategy}" in "${result.colName}"`, payload);
+        } else {
+          spinner.succeed(`Successfully generated "${result.targetModeName}" using strategy "${options.strategy}" in "${result.colName}"`);
+          console.log(chalk.gray(`    Variables updated: ${result.count}`));
+        }
       } else {
-        ctx.logError(result.error);
+        process.exitCode = 1;
+        spinner.fail(result.error, {
+          success: false,
+          collection: collectionName,
+          from: options.from,
+          to: options.to,
+          strategy: options.strategy,
+          error: result.error,
+        });
       }
     } catch (err) {
-      spinner.fail('Multi-mode generation failed');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Multi-mode generation failed', {
+        success: false,
+        collection: collectionName,
+        from: options.from,
+        to: options.to,
+        strategy: options.strategy,
+        error: err.message,
+      });
     }
   }
 }

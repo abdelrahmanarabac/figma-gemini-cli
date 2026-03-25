@@ -1,4 +1,5 @@
 import chalk from 'chalk';
+import ora from 'ora';
 
 export class CommandContext {
   /**
@@ -6,8 +7,10 @@ export class CommandContext {
    * @param {Object} deps - Injected dependencies
    */
   constructor(options = {}, deps = {}) {
-    // If output is piped or explicitly requests JSON, use strict JSON output.
-    this.isJson = options.json || !process.stdout.isTTY;
+    // JSON is opt-in. Non-interactive shells still suppress spinners,
+    // but should keep human-readable output unless --json is requested.
+    this.isJson = Boolean(options.json);
+    this.isInteractive = Boolean(process.stdout.isTTY);
 
     // Injected dependencies from the router to decouple Context from implementations
     this._deps = deps;
@@ -56,11 +59,64 @@ export class CommandContext {
     return symbols[type] || '';
   }
 
+  _printJson(payload) {
+    console.log(JSON.stringify(payload ?? {}, null, 2));
+  }
+
+  output(jsonPayload, renderHuman = null) {
+    if (this.isJson) {
+      this._printJson(jsonPayload);
+      return;
+    }
+
+    if (typeof renderHuman === 'function') {
+      renderHuman();
+      return;
+    }
+
+    if (jsonPayload !== undefined) {
+      console.log(jsonPayload);
+    }
+  }
+
+  startSpinner(text) {
+    if (this.isInteractive && !this.isJson) {
+      return ora(text).start();
+    }
+
+    const ctx = this;
+    return {
+      text,
+      start() {
+        return this;
+      },
+      stop() {
+        return this;
+      },
+      succeed(message, jsonPayload = null) {
+        if (message) {
+          ctx.logSuccess(message, jsonPayload);
+        }
+        return this;
+      },
+      fail(message, jsonPayload = null) {
+        if (message) {
+          ctx.logError(message, jsonPayload);
+        }
+        return this;
+      },
+      warn(message, jsonPayload = null) {
+        if (message) {
+          ctx.logWarning(message, jsonPayload);
+        }
+        return this;
+      },
+    };
+  }
+
   log(message, jsonPayload = null) {
     if (this.isJson) {
-      if (jsonPayload) {
-        console.log(JSON.stringify(jsonPayload, null, 2));
-      }
+      this._printJson(jsonPayload ?? { message });
       return;
     }
     console.log(message);
@@ -68,9 +124,7 @@ export class CommandContext {
 
   logSuccess(message, jsonPayload = null) {
     if (this.isJson) {
-      if (jsonPayload) {
-        console.log(JSON.stringify(jsonPayload, null, 2));
-      }
+      this._printJson(jsonPayload ?? { status: 'success', message });
       return;
     }
     console.log(chalk.green(`${this._getSymbol('success')} ${message}`));
@@ -79,14 +133,17 @@ export class CommandContext {
     }
   }
 
-  logWarning(message) {
-    if (this.isJson) return;
+  logWarning(message, jsonPayload = null) {
+    if (this.isJson) {
+      this._printJson(jsonPayload ?? { status: 'warning', message });
+      return;
+    }
     console.log(chalk.yellow(`${this._getSymbol('warning')} ${message}`));
   }
 
   logError(message, jsonPayload = null) {
     if (this.isJson) {
-      console.log(JSON.stringify(jsonPayload || { error: message }, null, 2));
+      this._printJson(jsonPayload || { status: 'error', error: message });
       return;
     }
     console.log(chalk.red(`${this._getSymbol('error')} ${message}`));

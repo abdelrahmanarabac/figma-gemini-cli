@@ -8,6 +8,9 @@
   "bin": {
     "figma-gemini-cli": "src/index.js"
   },
+  "scripts": {
+    "test": "node test/run-tests.js"
+  },
   "files": [
     "src"
   ],

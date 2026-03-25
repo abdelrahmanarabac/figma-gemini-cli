@@ -39,7 +39,7 @@ export const cards = {
 ${iconBlock}  <Text size={13} weight={medium} color={${labelColor}} w={fill}>${label}</Text>
   <Frame flex={row} items={center} gap={8} w={fill} h={hug}>
     <Text size={28} weight={bold} color={${valueColor}}>${value}</Text>
-    <Frame bg={${trendBg}} rounded={6} px={8} py={4}>
+    <Frame flex={row} bg={${trendBg}} rounded={6} px={8} py={4} items={center}>
       <Text size={12} weight={semibold} color={${trendColor}}>${trend}</Text>
     </Frame>
   </Frame>
@@ -75,7 +75,7 @@ ${iconBlock}  <Text size={13} weight={medium} color={${labelColor}} w={fill}>${l
   <Frame name={Features} w={fill} h={hug} flex={col} gap={12}>
 ${featsJsx}
   </Frame>
-  <Frame name={CTA_${name}} w={fill} h={48} bg={${btnBg}} rounded={12} justify={center} items={center}>
+  <Frame name={CTA_${name}} w={fill} h={48} flex={row} bg={${btnBg}} rounded={12} justify={center} items={center}>
     <Text size={16} weight={semibold} color={${btnColor}}>${ctaLabel}</Text>
   </Frame>
 </Frame>`;
@@ -107,7 +107,7 @@ ${featsJsx}
     const avatarBg = mode === 'Dark' ? '#334155' : resolveToken(tokens, 'semantic', 'color/surface-elevated', '#e2e8f0');
     const initials = name.split(' ').map(n => n[0]).join('').toUpperCase();
     return `<Frame name={ProfileCard} w={${w}} h={hug} bg={${bg}} flex={col} p={24} gap={16} rounded={16} shadow={0 4 16 rgba(0,0,0,0.06)} stroke={${border}} items={center}>
-  <Frame name={Avatar} w={64} h={64} bg={${avatarBg}} rounded={32} justify={center} items={center}>
+  <Frame name={Avatar} w={64} h={64} flex={row} bg={${avatarBg}} rounded={32} justify={center} items={center}>
     <Text size={24} weight={bold} color={${roleColor}}>${initials}</Text>
   </Frame>
   <Text size={18} weight={semibold} color={${nameColor}} align={center} w={fill}>${name}</Text>
@@ -125,8 +125,8 @@ ${featsJsx}
     const iconBg = mode === 'Dark' ? '#1e3a5f' : resolveToken(tokens, 'semantic', 'color/primary-light', '#eff6ff');
 
     const iconBlock = iconSvg
-      ? `  <Frame name={Icon_Wrap} w={48} h={48} bg={${iconBg}} rounded={12} justify={center} items={center}>\n    <SVG content={${iconSvg}} w={24} h={24} />\n  </Frame>`
-      : `  <Frame name={Icon_Wrap} w={48} h={48} bg={${iconBg}} rounded={12} justify={center} items={center}>\n    <Text size={20} color={${resolveToken(tokens, 'semantic', 'color/primary', '#3b82f6')}}>\u2605</Text>\n  </Frame>`;
+      ? `  <Frame name={Icon_Wrap} w={48} h={48} flex={row} bg={${iconBg}} rounded={12} justify={center} items={center}>\n    <SVG content={${iconSvg}} w={24} h={24} />\n  </Frame>`
+      : `  <Frame name={Icon_Wrap} w={48} h={48} flex={row} bg={${iconBg}} rounded={12} justify={center} items={center}>\n    <Text size={20} color={${resolveToken(tokens, 'semantic', 'color/primary', '#3b82f6')}}>\u2605</Text>\n  </Frame>`;
 
     return `<Frame name={FeatureCard_${title.replace(/\\s+/g, '_')}} w={${w}} h={hug} bg={${bg}} flex={col} p={24} gap={16} rounded={16} shadow={0 4 16 rgba(0,0,0,0.06)} stroke={${border}}>
 ${iconBlock}

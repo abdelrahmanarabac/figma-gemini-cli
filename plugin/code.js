@@ -15,6 +15,166 @@ figma.showUI(__html__, {
 const streams = new Map();
 let streamTaskQueue = Promise.resolve(); // Global Sequential Mutex
 
+function scaleResponsiveValue(value, factor, min) {
+  return Math.max(min, Math.round(value * factor));
+}
+
+function firstDefined() {
+  for (let i = 0; i < arguments.length; i++) {
+    if (arguments[i] !== undefined && arguments[i] !== null) {
+      return arguments[i];
+    }
+  }
+  return undefined;
+}
+
+function normalizeFontStyleName(weight) {
+  const styleMap = {
+    '100': 'Thin',
+    '200': 'Extra Light',
+    '300': 'Light',
+    '400': 'Regular',
+    '500': 'Medium',
+    '600': 'Semi Bold',
+    '700': 'Bold',
+    '800': 'Extra Bold',
+    '900': 'Black',
+  };
+  return styleMap[String(weight)] || 'Regular';
+}
+
+function buildTextStyleDescription(styleSpec) {
+  if (styleSpec.description) {
+    return styleSpec.description;
+  }
+
+  if (styleSpec.tokens) {
+    return 'Tokens: ' + Object.entries(styleSpec.tokens).map(function(entry) {
+      return entry[0] + '=' + entry[1];
+    }).join(', ');
+  }
+
+  return '';
+}
+
+async function resolveTextStyleFont(styleSpec) {
+  const requestedFont = styleSpec.fontName || {
+    family: styleSpec.fontFamily || 'Roboto',
+    style: normalizeFontStyleName(styleSpec.fontWeight || 400),
+  };
+
+  try {
+    await figma.loadFontAsync(requestedFont);
+    return requestedFont;
+  } catch (error) {
+    const fallbackFont = {
+      family: 'Inter',
+      style: normalizeFontStyleName(styleSpec.fontWeight || 400),
+    };
+
+    try {
+      await figma.loadFontAsync(fallbackFont);
+      return fallbackFont;
+    } catch (innerError) {
+      const safeFallback = { family: 'Inter', style: 'Regular' };
+      await figma.loadFontAsync(safeFallback);
+      return safeFallback;
+    }
+  }
+}
+
+async function upsertTextStyle(styleSpec, existingTextStyles) {
+  let style = existingTextStyles.find(function(item) {
+    return item.name === styleSpec.name;
+  });
+  let created = false;
+
+  if (!style) {
+    style = figma.createTextStyle();
+    existingTextStyles.push(style);
+    created = true;
+  }
+
+  style.name = styleSpec.name;
+  style.fontName = await resolveTextStyleFont(styleSpec);
+
+  if (styleSpec.fontSize !== undefined) {
+    style.fontSize = styleSpec.fontSize;
+  }
+
+  if (styleSpec.lineHeight !== undefined) {
+    style.lineHeight = typeof styleSpec.lineHeight === 'object'
+      ? styleSpec.lineHeight
+      : { value: styleSpec.lineHeight, unit: 'PIXELS' };
+  }
+
+  if (styleSpec.letterSpacing !== undefined) {
+    style.letterSpacing = typeof styleSpec.letterSpacing === 'object'
+      ? styleSpec.letterSpacing
+      : { value: styleSpec.letterSpacing, unit: 'PIXELS' };
+  }
+
+  if (styleSpec.textCase !== undefined) {
+    style.textCase = styleSpec.textCase;
+  }
+
+  if ('description' in style) {
+    try {
+      style.description = buildTextStyleDescription(styleSpec);
+    } catch (error) {}
+  }
+
+  return { style: style, created: created };
+}
+
+async function applyResponsiveAdaptation(node, breakpoint) {
+  const isMobile = breakpoint <= 375;
+  const isTabletOrSmaller = breakpoint <= 768;
+
+  if ('layoutMode' in node && node.layoutMode !== 'NONE') {
+    if (isTabletOrSmaller && node.layoutMode === 'HORIZONTAL' && 'children' in node && node.children.length > 1) {
+      node.layoutMode = 'VERTICAL';
+    }
+
+    if (isMobile) {
+      if ('itemSpacing' in node && typeof node.itemSpacing === 'number' && node.itemSpacing > 16) {
+        node.itemSpacing = scaleResponsiveValue(node.itemSpacing, 0.75, 8);
+      }
+
+      const paddingKeys = ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'];
+      for (const key of paddingKeys) {
+        if (key in node && typeof node[key] === 'number' && node[key] > 24) {
+          node[key] = scaleResponsiveValue(node[key], 0.66, 16);
+        }
+      }
+    }
+  }
+
+  if (node.type === 'TEXT' && isMobile && typeof node.fontSize === 'number' && node.fontSize > 24) {
+    node.fontSize = Math.max(18, Math.round(node.fontSize * 0.75));
+  }
+
+  if ('children' in node) {
+    for (const child of node.children) {
+      if (
+        isTabletOrSmaller &&
+        'layoutMode' in node &&
+        node.layoutMode !== 'NONE' &&
+        'layoutSizingHorizontal' in child &&
+        child.layoutSizingHorizontal === 'FIXED' &&
+        typeof child.width === 'number' &&
+        child.width > breakpoint * 0.9
+      ) {
+        try {
+          child.layoutSizingHorizontal = 'FILL';
+        } catch (e) {}
+      }
+
+      await applyResponsiveAdaptation(child, breakpoint);
+    }
+  }
+}
+
 // ── Command Handlers ─────────────────────────────────
 
 const handlers = {
@@ -51,21 +211,34 @@ const handlers = {
   },
 
   'style.create_text': async (params) => {
-    const { name, fontSize, fontName, lineHeight, letterSpacing, textCase } = params;
-    let s = figma.getLocalTextStyles().find(st => st.name === name);
-    if (!s) s = figma.createTextStyle();
-    s.name = name;
-    
-    if (fontName) {
-      await figma.loadFontAsync(fontName);
-      s.fontName = fontName;
-    }
-    if (fontSize !== undefined) s.fontSize = fontSize;
-    if (lineHeight) s.lineHeight = lineHeight;
-    if (letterSpacing) s.letterSpacing = letterSpacing;
-    if (textCase) s.textCase = textCase;
+    const existingTextStyles = await figma.getLocalTextStylesAsync();
+    const result = await upsertTextStyle(params, existingTextStyles);
+    return { id: result.style.id, name: result.style.name, created: result.created };
+  },
 
-    return { id: s.id, name: s.name };
+  'style.create_text_styles': async (params) => {
+    const styles = Array.isArray(params.styles) ? params.styles : [];
+    const existingTextStyles = await figma.getLocalTextStylesAsync();
+    const names = [];
+    let created = 0;
+    let updated = 0;
+
+    for (const styleSpec of styles) {
+      const result = await upsertTextStyle(styleSpec, existingTextStyles);
+      names.push(result.style.name);
+      if (result.created) {
+        created++;
+      } else {
+        updated++;
+      }
+    }
+
+    return {
+      total: styles.length,
+      created,
+      updated,
+      names,
+    };
   },
 
   'style.update_typography': async (params) => {
@@ -231,6 +404,151 @@ const handlers = {
     return { created: count, collection: collectionName };
   },
 
+  'tokens.create_system': async (params) => {
+    const system = params.system || {};
+    const collectionSpecs = Array.isArray(system.collections) ? system.collections : [];
+    const textStyleSpecs = Array.isArray(system.textStyles) ? system.textStyles : [];
+
+    const existingCollections = await figma.variables.getLocalVariableCollectionsAsync();
+    const existingVariables = await figma.variables.getLocalVariablesAsync();
+    const collectionMap = new Map();
+    const modeMap = new Map();
+    const variableMap = new Map();
+
+    let createdCollections = 0;
+    let createdVariables = 0;
+    let createdTextStyles = 0;
+
+    function getVariableKey(collectionName, variableName) {
+      return `${collectionName}::${variableName}`;
+    }
+
+    async function ensureCollection(collectionSpec) {
+      let collection = existingCollections.find(c => c.name === collectionSpec.name);
+      if (!collection) {
+        collection = figma.variables.createVariableCollection(collectionSpec.name);
+        existingCollections.push(collection);
+        createdCollections++;
+      }
+
+      const desiredModes = Array.isArray(collectionSpec.modes) && collectionSpec.modes.length > 0
+        ? collectionSpec.modes
+        : ['Base'];
+
+      if (collection.modes.length > 0 && collection.modes[0].name !== desiredModes[0]) {
+        collection.renameMode(collection.modes[0].modeId, desiredModes[0]);
+      }
+
+      for (let i = 1; i < desiredModes.length; i++) {
+        if (!collection.modes.find(mode => mode.name === desiredModes[i])) {
+          collection.addMode(desiredModes[i]);
+        }
+      }
+
+      collectionMap.set(collectionSpec.name, collection);
+      modeMap.set(
+        collectionSpec.name,
+        new Map(collection.modes.map(mode => [mode.name, mode.modeId]))
+      );
+
+      return collection;
+    }
+
+    async function ensureVariable(collectionSpec, variableSpec) {
+      const collection = collectionMap.get(collectionSpec.name) || await ensureCollection(collectionSpec);
+      let variable = existingVariables.find(v => v.variableCollectionId === collection.id && v.name === variableSpec.name);
+      if (!variable) {
+        variable = figma.variables.createVariable(variableSpec.name, collection, variableSpec.type);
+        existingVariables.push(variable);
+        createdVariables++;
+      }
+      variableMap.set(getVariableKey(collectionSpec.name, variableSpec.name), variable);
+      return variable;
+    }
+
+    function resolveAlias(value) {
+      if (!value || typeof value !== 'object' || !value.alias) return null;
+      const targetCollection = value.alias.collection;
+      const targetVariable = value.alias.variable;
+      return variableMap.get(getVariableKey(targetCollection, targetVariable)) || null;
+    }
+
+    function resolveValueForVariable(variable, value) {
+      if (value && typeof value === 'object' && value.alias) {
+        const aliasTarget = resolveAlias(value);
+        if (!aliasTarget) {
+          throw new Error(`Alias target not found: ${value.alias.collection}/${value.alias.variable}`);
+        }
+        return { type: 'VARIABLE_ALIAS', id: aliasTarget.id };
+      }
+
+      if (variable.resolvedType === 'COLOR') {
+        if (typeof value !== 'string') {
+          throw new Error(`Expected color string for ${variable.name}`);
+        }
+        const parsed = parseColor(value);
+        if (!parsed) {
+          throw new Error(`Invalid color value for ${variable.name}: ${value}`);
+        }
+        return {
+          r: parsed.r,
+          g: parsed.g,
+          b: parsed.b,
+          a: parsed.a !== undefined ? parsed.a : 1,
+        };
+      }
+
+      if (variable.resolvedType === 'FLOAT') return Number(value);
+      if (variable.resolvedType === 'BOOLEAN') return Boolean(value);
+      return String(value);
+    }
+
+    for (const collectionSpec of collectionSpecs) {
+      await ensureCollection(collectionSpec);
+    }
+
+    for (const collectionSpec of collectionSpecs) {
+      for (const variableSpec of (collectionSpec.variables || [])) {
+        await ensureVariable(collectionSpec, variableSpec);
+      }
+    }
+
+    for (const collectionSpec of collectionSpecs) {
+      const collectionModes = modeMap.get(collectionSpec.name);
+      const fallbackModeId = collectionModes.values().next().value;
+
+      for (const variableSpec of (collectionSpec.variables || [])) {
+        const variable = variableMap.get(getVariableKey(collectionSpec.name, variableSpec.name));
+        const values = variableSpec.values || {};
+
+        for (const [modeName, rawValue] of Object.entries(values)) {
+          const modeId = collectionModes.get(modeName) || fallbackModeId;
+          const resolvedValue = resolveValueForVariable(variable, rawValue);
+          variable.setValueForMode(modeId, resolvedValue);
+        }
+      }
+    }
+
+    const existingTextStyles = await figma.getLocalTextStylesAsync();
+
+    for (const styleSpec of textStyleSpecs) {
+      const result = await upsertTextStyle(styleSpec, existingTextStyles);
+      if (result.created) {
+        createdTextStyles++;
+      }
+    }
+
+    return {
+      system: system.name || 'custom',
+      prefix: system.prefix || null,
+      collections: collectionSpecs.length,
+      variables: createdVariables,
+      textStyles: createdTextStyles,
+      createdCollections,
+      collectionNames: collectionSpecs.map(collection => collection.name),
+    };
+  },
+
   'eval': async (params) => {
     try {
       // Create an async function wrapper that provides 'figma' and other globals
@@ -359,6 +677,7 @@ const handlers = {
       
       clone.name = `${sourceNode.name} (${width}px)`;
       clone.resize(width, clone.height);
+      await applyResponsiveAdaptation(clone, width);
       clone.x = lastX;
       clone.y = sourceNode.y;
       
@@ -1172,24 +1491,6 @@ function serializeColor(color, opacity) {
 async function applyPropsToNode(node, props) {
   if (props.name) node.name = props.name;
 
-  // Infer layoutMode if AL properties are present but flex is missing
-  if (!props.layoutMode && node.type === 'FRAME') {
-    const hasALProps = props.primaryAxisAlignItems !== undefined || 
-                       props.counterAxisAlignItems !== undefined || 
-                       props.itemSpacing !== undefined ||
-                       props.padding !== undefined ||
-                       props.paddingHorizontal !== undefined ||
-                       props.paddingVertical !== undefined ||
-                       props.paddingTop !== undefined ||
-                       props.paddingBottom !== undefined ||
-                       props.paddingLeft !== undefined ||
-                       props.paddingRight !== undefined;
-    if (hasALProps) {
-      // Default to VERTICAL (col) if multiple children or unspecified, as it is a safer default for cards/stacks
-      props.layoutMode = 'VERTICAL';
-    }
-  }
-
   if (node.type === 'TEXT') {
     // 1. Apply Text Style if provided
     if (props.style) {
@@ -1384,10 +1685,10 @@ async function applyPropsToNode(node, props) {
 
   // Padding
   const pMap = { 
-    paddingLeft: props.paddingLeft || props.paddingHorizontal || props.padding, 
-    paddingRight: props.paddingRight || props.paddingHorizontal || props.padding, 
-    paddingTop: props.paddingTop || props.paddingVertical || props.padding, 
-    paddingBottom: props.paddingBottom || props.paddingVertical || props.padding 
+    paddingLeft: firstDefined(props.paddingLeft, props.paddingHorizontal, props.padding), 
+    paddingRight: firstDefined(props.paddingRight, props.paddingHorizontal, props.padding), 
+    paddingTop: firstDefined(props.paddingTop, props.paddingVertical, props.padding), 
+    paddingBottom: firstDefined(props.paddingBottom, props.paddingVertical, props.padding) 
   };
   for (const [key, val] of Object.entries(pMap)) {
     if (val !== undefined && key in node) {
@@ -1404,6 +1705,7 @@ async function applyPropsToNode(node, props) {
   const parent = node.parent;
   const hasALParent = parent && 'layoutMode' in parent && parent.layoutMode !== 'NONE';
   const isALFrame = 'layoutMode' in node && node.layoutMode !== 'NONE';
+  const canUseAutoLayoutSizing = hasALParent || isALFrame;
 
   if ('layoutSizingHorizontal' in node) {
     if (typeof props.width === 'number') {
@@ -1411,7 +1713,7 @@ async function applyPropsToNode(node, props) {
       node.resize(props.width, node.height);
     } else if (props.width === 'fill' && hasALParent) {
       node.layoutSizingHorizontal = 'FILL';
-    } else if (props.width === 'hug' || node.type === 'TEXT' || isALFrame) {
+    } else if (canUseAutoLayoutSizing && (props.width === 'hug' || node.type === 'TEXT' || isALFrame)) {
       node.layoutSizingHorizontal = 'HUG';
     }
   }
@@ -1422,7 +1724,7 @@ async function applyPropsToNode(node, props) {
       node.resize(node.width, props.height);
     } else if (props.height === 'fill' && hasALParent) {
       node.layoutSizingVertical = 'FILL';
-    } else if (props.height === 'hug' || node.type === 'TEXT' || isALFrame) {
+    } else if (canUseAutoLayoutSizing && (props.height === 'hug' || node.type === 'TEXT' || isALFrame)) {
       node.layoutSizingVertical = 'HUG';
     }
   }

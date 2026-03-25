@@ -1,5 +1,4 @@
 import { Command } from '../cli/command.js';
-import ora from 'ora';
 
 class BindCommand extends Command {
   name = 'bind <property> <variableName>';
@@ -14,7 +13,7 @@ class BindCommand extends Command {
   }
 
   async execute(ctx, options, property, variableName) {
-    const spinner = ora(`Binding "${variableName}" to "${property}"...`).start();
+    const spinner = ctx.startSpinner(`Binding "${variableName}" to "${property}"...`);
     try {
       const code = `
         const prop = ${JSON.stringify(property)};
@@ -66,12 +65,38 @@ class BindCommand extends Command {
       `;
       
       const result = await ctx.eval(code);
-      spinner.stop();
-      if (result.success) ctx.logSuccess(`Bound "${variableName}" to ${result.count} nodes.`);
-      else ctx.logError(result.error);
+      if (result.success) {
+        const payload = {
+          success: true,
+          property,
+          variableName,
+          count: result.count,
+          nodeIds: options.node || [],
+        };
+        if (ctx.isJson) {
+          ctx.logSuccess(`Bound "${variableName}" to ${result.count} nodes.`, payload);
+        } else {
+          spinner.succeed(`Bound "${variableName}" to ${result.count} nodes.`);
+        }
+      } else {
+        process.exitCode = 1;
+        spinner.fail(result.error, {
+          success: false,
+          property,
+          variableName,
+          nodeIds: options.node || [],
+          error: result.error,
+        });
+      }
     } catch (err) {
-      spinner.fail('Binding failed');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Binding failed', {
+        success: false,
+        property,
+        variableName,
+        nodeIds: options.node || [],
+        error: err.message,
+      });
     }
   }
 }

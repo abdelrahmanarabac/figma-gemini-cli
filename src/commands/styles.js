@@ -1,6 +1,7 @@
 import { Command } from '../cli/command.js';
 import chalk from 'chalk';
 import ora from 'ora';
+import { buildMaterial3TypographyStyles } from '../data/design-systems/material3.js';
 
 class StyleListCommand extends Command {
   name = 'style list';
@@ -8,15 +9,17 @@ class StyleListCommand extends Command {
   needsConnection = true;
 
   async execute(ctx) {
-    const spinner = ora('Fetching styles...').start();
+    const spinner = ctx.isInteractive ? ora('Fetching styles...').start() : null;
     try {
       const { data } = await ctx.command('style.list');
-      spinner.stop();
+      spinner?.stop();
 
-      if (!data) {
-        console.log(chalk.yellow('\n  No styles found.\n'));
-        return;
-      }
+      const stylesByType = {
+        text: data?.text || [],
+        paint: data?.paint || [],
+        effect: data?.effect || [],
+        grid: data?.grid || [],
+      };
 
       const types = [
         { key: 'text', label: 'Text Styles', color: chalk.cyan },
@@ -25,19 +28,34 @@ class StyleListCommand extends Command {
         { key: 'grid', label: 'Grid Styles', color: chalk.yellow }
       ];
 
-      types.forEach(({ key, label, color }) => {
-        const styles = data[key];
-        if (styles && styles.length > 0) {
-          console.log(color(`\n  ${label} (${styles.length}):\n`));
-          styles.forEach(s => {
-            console.log(chalk.white(`    • ${chalk.bold(s.name)}`));
-            console.log(chalk.gray(`      ID: ${s.id}`));
-          });
-        }
+      const counts = Object.fromEntries(
+        Object.entries(stylesByType).map(([key, styles]) => [key, styles.length])
+      );
+      const total = Object.values(counts).reduce((sum, count) => sum + count, 0);
+
+      if (total === 0) {
+        ctx.output(
+          { styles: stylesByType, counts, total, message: 'No styles found.' },
+          () => console.log(chalk.yellow('\n  No styles found.\n'))
+        );
+        return;
+      }
+
+      ctx.output({ styles: stylesByType, counts, total }, () => {
+        types.forEach(({ key, label, color }) => {
+          const styles = stylesByType[key];
+          if (styles.length > 0) {
+            console.log(color(`\n  ${label} (${styles.length}):\n`));
+            styles.forEach(s => {
+              console.log(chalk.white(`    • ${chalk.bold(s.name)}`));
+              console.log(chalk.gray(`      ID: ${s.id}`));
+            });
+          }
+        });
+        console.log();
       });
-      console.log();
     } catch (err) {
-      spinner.fail('Failed to list styles');
+      spinner?.fail('Failed to list styles');
       ctx.logError(err.message);
     }
   }
@@ -49,25 +67,95 @@ class StyleUpdateCommand extends Command {
   needsConnection = true;
 
   async execute(ctx, options, family, pattern) {
-    const spinner = ora(`Updating styles to ${family}...`).start();
+    const spinner = ctx.startSpinner(`Updating styles to ${family}...`);
     try {
       const { data } = await ctx.command('style.update_typography', { family, pattern });
-      spinner.stop();
+      const payload = {
+        family,
+        pattern: pattern || null,
+        updated: data.updated,
+        total: data.total,
+        failed: data.failed,
+        errors: data.errors || [],
+      };
 
       if (data.updated > 0) {
-        ctx.logSuccess(`Successfully updated ${data.updated}/${data.total} styles.`);
+        if (ctx.isJson) {
+          ctx.logSuccess(`Successfully updated ${data.updated}/${data.total} styles.`, payload);
+        } else {
+          spinner.succeed(`Successfully updated ${data.updated}/${data.total} styles.`);
+        }
       } else {
-        ctx.logWarning(`No styles were updated. (Total found: ${data.total})`);
+        if (ctx.isJson) {
+          ctx.logWarning(`No styles were updated. (Total found: ${data.total})`, payload);
+        } else {
+          spinner.warn(`No styles were updated. (Total found: ${data.total})`);
+        }
       }
 
       if (data.failed > 0) {
-        ctx.logError(`${data.failed} styles failed to update:`, data.errors);
+        process.exitCode = 1;
+        ctx.logError(`${data.failed} styles failed to update.`, payload);
       }
     } catch (err) {
-      spinner.fail('Typography update failed');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Typography update failed', {
+        family,
+        pattern: pattern || null,
+        error: err.message,
+      });
     }
   }
 }
 
-export default [new StyleListCommand(), new StyleUpdateCommand()];
+class StyleMaterial3Command extends Command {
+  name = 'style material3';
+  description = 'Create Material 3 typography text styles from the shared token system';
+  needsConnection = true;
+  options = [
+    { flags: '--prefix <name>', description: 'Style prefix', defaultValue: 'm3' },
+    { flags: '--font-family <family>', description: 'Typography family', defaultValue: 'Roboto' }
+  ];
+
+  async execute(ctx, options) {
+    const spinner = ctx.startSpinner('Creating Material 3 text styles...');
+    const prefix = options.prefix || 'm3';
+    const fontFamily = options.fontFamily || 'Roboto';
+
+    try {
+      const styles = buildMaterial3TypographyStyles({ prefix, fontFamily });
+      const { data } = await ctx.command('style.create_text_styles', { styles });
+      const payload = {
+        preset: 'material3',
+        prefix,
+        fontFamily,
+        total: data.total,
+        created: data.created,
+        updated: data.updated,
+        names: data.names || [],
+      };
+
+      if (ctx.isJson) {
+        ctx.logSuccess(`Created or updated ${data.total} Material 3 text styles.`, payload);
+      } else {
+        spinner.succeed(`Created or updated ${data.total} Material 3 text styles.`);
+      }
+    } catch (err) {
+      process.exitCode = 1;
+      const payload = {
+        preset: 'material3',
+        prefix,
+        fontFamily,
+        error: err.message,
+      };
+
+      if (ctx.isJson) {
+        ctx.logError('Failed to create Material 3 text styles.', payload);
+      } else {
+        spinner.fail('Failed to create Material 3 text styles');
+      }
+    }
+  }
+}
+
+export default [new StyleListCommand(), new StyleUpdateCommand(), new StyleMaterial3Command()];

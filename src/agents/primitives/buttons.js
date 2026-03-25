@@ -13,7 +13,7 @@ export const buttons = {
     const { label = 'Button', w = 'hug', mode = 'Light', tokens } = opts;
     const bg = resolveToken(tokens, 'semantic', 'color/primary', '#3b82f6');
     const color = resolveToken(tokens, 'semantic', 'color/on-primary', '#ffffff');
-    return `<Frame name={Button_Primary} w={${w}} h={48} bg={${bg}} rounded={12} px={24} py={12} justify={center} items={center}>
+    return `<Frame name={Button_Primary} w={${w}} h={48} flex={row} bg={${bg}} rounded={12} px={24} py={12} justify={center} items={center}>
   <Text size={16} weight={semibold} color={${color}}>${label}</Text>
 </Frame>`;
   },
@@ -23,7 +23,7 @@ export const buttons = {
     const bg = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/surface-inverse', '#1e293b') : resolveToken(tokens, 'semantic', 'color/surface-elevated', '#f1f5f9');
     const color = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/on-surface-inverse', '#e2e8f0') : resolveToken(tokens, 'semantic', 'color/on-surface', '#1e293b');
     const border = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/border-dark', '#334155') : resolveToken(tokens, 'semantic', 'color/border', '#e2e8f0');
-    return `<Frame name={Button_Secondary} w={${w}} h={48} bg={${bg}} rounded={12} px={24} py={12} justify={center} items={center} stroke={${border}}>
+    return `<Frame name={Button_Secondary} w={${w}} h={48} flex={row} bg={${bg}} rounded={12} px={24} py={12} justify={center} items={center} stroke={${border}}>
   <Text size={16} weight={semibold} color={${color}}>${label}</Text>
 </Frame>`;
   },
@@ -31,7 +31,7 @@ export const buttons = {
   ghost(opts = {}) {
     const { label = 'Button', w = 'hug', mode = 'Light', tokens } = opts;
     const color = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/primary-light', '#93c5fd') : resolveToken(tokens, 'semantic', 'color/primary', '#3b82f6');
-    return `<Frame name={Button_Ghost} w={${w}} h={48} rounded={12} px={24} py={12} justify={center} items={center}>
+    return `<Frame name={Button_Ghost} w={${w}} h={48} flex={row} rounded={12} px={24} py={12} justify={center} items={center}>
   <Text size={16} weight={semibold} color={${color}}>${label}</Text>
 </Frame>`;
   },
@@ -40,7 +40,7 @@ export const buttons = {
     const { label = 'Delete', w = 'hug', mode = 'Light', tokens } = opts;
     const bg = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/destructive-dark', '#dc2626') : resolveToken(tokens, 'semantic', 'color/destructive', '#ef4444');
     const color = resolveToken(tokens, 'semantic', 'color/on-destructive', '#ffffff');
-    return `<Frame name={Button_Destructive} w={${w}} h={48} bg={${bg}} rounded={12} px={24} py={12} justify={center} items={center}>
+    return `<Frame name={Button_Destructive} w={${w}} h={48} flex={row} bg={${bg}} rounded={12} px={24} py={12} justify={center} items={center}>
   <Text size={16} weight={semibold} color={${color}}>${label}</Text>
 </Frame>`;
   },
@@ -50,11 +50,11 @@ export const buttons = {
     const bg = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/surface-inverse', '#1e293b') : resolveToken(tokens, 'semantic', 'color/surface-elevated', '#f1f5f9');
     const color = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/on-surface-inverse', '#e2e8f0') : resolveToken(tokens, 'semantic', 'color/on-surface', '#1e293b');
     if (iconSvg) {
-      return `<Frame name={IconButton} w={${w}} h={44} bg={${bg}} rounded={12} justify={center} items={center}>
+      return `<Frame name={IconButton} w={${w}} h={44} flex={row} bg={${bg}} rounded={12} justify={center} items={center}>
   <SVG content={${iconSvg}} w={20} h={20} />
 </Frame>`;
     }
-    return `<Frame name={IconButton} w={${w}} h={44} bg={${bg}} rounded={12} justify={center} items={center}>
+    return `<Frame name={IconButton} w={${w}} h={44} flex={row} bg={${bg}} rounded={12} justify={center} items={center}>
   <Text size={14} weight={semibold} color={${color}}>${label || '•'}</Text>
 </Frame>`;
   },

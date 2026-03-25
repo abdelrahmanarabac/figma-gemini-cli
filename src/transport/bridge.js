@@ -3,8 +3,7 @@
  * Sends structured commands via HTTP, receives JSON responses.
  */
 
-const PORT = parseInt(process.env.DAEMON_PORT) || 3456;
-const DAEMON_URL = `http://127.0.0.1:${PORT}`;
+import { getDaemonUrl } from '../utils/daemon-config.js';
 
 /**
  * Send a structured command to the daemon.
@@ -14,6 +13,7 @@ const DAEMON_URL = `http://127.0.0.1:${PORT}`;
  * @returns {Promise<{ status: string, data?: any, error?: any }>}
  */
 export async function sendCommand(command, params = {}, opts = {}) {
+    const daemonUrl = getDaemonUrl();
     const timeout = opts.timeout || 30000;
     const maxRetries = opts.retries || 3;
     let lastError;
@@ -23,7 +23,7 @@ export async function sendCommand(command, params = {}, opts = {}) {
         const timer = setTimeout(() => controller.abort(), timeout);
 
         try {
-            const res = await fetch(`${DAEMON_URL}/command`, {
+            const res = await fetch(`${daemonUrl}/command`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ command, params }),
@@ -52,7 +52,7 @@ export async function sendCommand(command, params = {}, opts = {}) {
     }
 
     if (lastError?.cause?.code === 'ECONNREFUSED') {
-        throw new Error(`[Connection Error] Daemon unreachable at ${DAEMON_URL}. Ensure "figma-gemini-cli connect" is running.`);
+        throw new Error(`[Connection Error] Daemon unreachable at ${daemonUrl}. Ensure "figma-gemini-cli connect" is running.`);
     }
     throw lastError;
 }
@@ -62,8 +62,9 @@ export async function sendCommand(command, params = {}, opts = {}) {
  * @returns {Promise<{ status: string, plugin: boolean }>}
  */
 export async function checkHealth() {
+    const daemonUrl = getDaemonUrl();
     try {
-        const res = await fetch(`${DAEMON_URL}/health`, { signal: AbortSignal.timeout(3000) });
+        const res = await fetch(`${daemonUrl}/health`, { signal: AbortSignal.timeout(3000) });
         return await res.json();
     } catch {
         return { status: 'unreachable', plugin: false };

@@ -3,7 +3,8 @@ import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import chalk from 'chalk';
-import ora from 'ora';
+import { checkHealth } from '../transport/bridge.js';
+import { buildMaterial3System } from '../data/design-systems/material3.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const palettesDir = join(__dirname, '..', 'data', 'palettes');
@@ -13,6 +14,36 @@ function loadPalette(name) {
   return JSON.parse(readFileSync(join(palettesDir, name + '.json'), 'utf8'));
 }
 
+const CREATE_PRESET_OPTIONS = [
+  { name: 'material3', description: 'Layered tokens + text styles' },
+  { name: 'tailwind', description: 'Full color palette' },
+  { name: 'shadcn', description: 'UI primitives' },
+  { name: 'spacing', description: '4px base scale' },
+  { name: 'radii', description: 'Border corner scale' },
+];
+
+function finishSuccess(ctx, spinner, message, payload) {
+  if (ctx.isJson) {
+    ctx.logSuccess(message, payload);
+  } else {
+    spinner.succeed(message);
+  }
+}
+
+function finishError(ctx, spinner, message, error = null, payload = null) {
+  process.exitCode = 1;
+  const jsonPayload = payload || { error: error?.message || message };
+
+  if (ctx.isJson) {
+    ctx.logError(message, jsonPayload);
+  } else {
+    spinner.fail(message);
+    if (error?.message) {
+      console.log(chalk.red(error.message));
+    }
+  }
+}
+
 // ── Tokens Commands ─────────────────────────────────
 
 class TokensClearCommand extends Command {
@@ -20,17 +51,23 @@ class TokensClearCommand extends Command {
   description = 'Delete all local variables and collections';
 
   async execute(ctx) {
-    const spinner = ora('Clearing all tokens...').start();
+    const spinner = ctx.startSpinner('Clearing all tokens...');
     try {
       const { data } = await ctx.command('tokens.delete_all');
-      if (data) {
-        spinner.succeed(`Deleted ${data.deletedCollections || 0} collections and ${data.deletedVariables || 0} variables`);
-      } else {
-        spinner.succeed('Cleared all tokens');
-      }
+      const payload = {
+        deletedCollections: data?.deletedCollections || 0,
+        deletedVariables: data?.deletedVariables || 0,
+      };
+      finishSuccess(
+        ctx,
+        spinner,
+        data
+          ? `Deleted ${payload.deletedCollections} collections and ${payload.deletedVariables} variables`
+          : 'Cleared all tokens',
+        payload
+      );
     } catch (error) {
-      spinner.fail('Failed to clear tokens');
-      console.error(error.message);
+      finishError(ctx, spinner, 'Failed to clear tokens', error);
     }
   }
 }
@@ -43,17 +80,24 @@ class TokensTailwindCommand extends Command {
   ];
 
   async execute(ctx, opts) {
-    const spinner = ora('Creating Tailwind color palette...').start();
+    const spinner = ctx.startSpinner('Creating Tailwind color palette...');
     const colors = loadPalette('tailwind');
     try {
       const { data } = await ctx.command('tokens.create_palette', {
         colors,
         collectionName: opts.collection
       });
-      spinner.succeed(`Created ${data.created} color variables in ${data.collection}`);
+      finishSuccess(ctx, spinner, `Created ${data.created} color variables in ${data.collection}`, {
+        preset: 'tailwind',
+        created: data.created,
+        collection: data.collection,
+      });
     } catch (error) {
-      spinner.fail('Failed to create palette');
-      console.error(error.message);
+      finishError(ctx, spinner, 'Failed to create palette', error, {
+        preset: 'tailwind',
+        collection: opts.collection,
+        error: error.message,
+      });
     }
   }
 }
@@ -66,17 +110,65 @@ class TokensShadcnCommand extends Command {
   ];
 
   async execute(ctx, opts) {
-    const spinner = ora('Creating shadcn color primitives...').start();
-    const colors = loadPalette('tailwind');
+    const spinner = ctx.startSpinner('Creating shadcn token layers...');
+    const shadcnData = loadPalette('shadcn');
     try {
-      const { data } = await ctx.command('tokens.create_palette', {
-        colors,
-        collectionName: opts.collection
+      const { data } = await ctx.command('tokens.create_shadcn', {
+        primitives: shadcnData.primitives,
+        semanticTokens: shadcnData.semantic
       });
-      spinner.succeed(`Created ${data.created} shadcn primitives`);
+      finishSuccess(ctx, spinner, `Created ${data.primCount} shadcn primitives and ${data.semCount} semantic tokens`, {
+        preset: 'shadcn',
+        primitiveCount: data.primCount,
+        semanticCount: data.semCount,
+        collection: opts.collection,
+      });
     } catch (error) {
-      spinner.fail('Failed to create shadcn colors');
-      console.error(error.message);
+      finishError(ctx, spinner, 'Failed to create shadcn colors', error, {
+        preset: 'shadcn',
+        error: error.message,
+      });
+    }
+  }
+}
+
+class TokensMaterial3Command extends Command {
+  name = 'tokens material3';
+  description = 'Create a layered Material 3 token system with typography styles';
+  options = [
+    { flags: '--prefix <name>', description: 'Collection and style prefix', defaultValue: 'm3' },
+    { flags: '--font-family <family>', description: 'Typography family', defaultValue: 'Roboto' },
+    { flags: '--no-styles', description: 'Create tokens without text styles' }
+  ];
+
+  async execute(ctx, opts) {
+    const spinner = ctx.startSpinner('Creating Material 3 token system...');
+    try {
+      const system = buildMaterial3System({
+        prefix: opts.prefix,
+        fontFamily: opts.fontFamily,
+        includeTextStyles: opts.styles !== false,
+      });
+      const { data } = await ctx.command('tokens.create_system', { system });
+      finishSuccess(ctx, spinner, `Created Material 3 system: ${data.variables} variables across ${data.collections} collections${opts.styles !== false ? ` + ${data.textStyles} text styles` : ''}`, {
+        preset: 'material3',
+        prefix: opts.prefix,
+        fontFamily: opts.fontFamily,
+        includeTextStyles: opts.styles !== false,
+        collections: data.collections,
+        variables: data.variables,
+        textStyles: data.textStyles,
+        createdCollections: data.createdCollections,
+        collectionNames: data.collectionNames,
+      });
+    } catch (error) {
+      finishError(ctx, spinner, 'Failed to create Material 3 system', error, {
+        preset: 'material3',
+        prefix: opts.prefix,
+        fontFamily: opts.fontFamily,
+        includeTextStyles: opts.styles !== false,
+        error: error.message,
+      });
     }
   }
 }
@@ -89,33 +181,49 @@ class TokensPresetCommand extends Command {
     const presetLower = preset.toLowerCase();
 
     if (presetLower === 'shadcn') {
-      const spinner = ora('Adding shadcn colors...').start();
+      const spinner = ctx.startSpinner('Adding shadcn colors...');
       const shadcnData = loadPalette('shadcn');
       try {
         const { data } = await ctx.command('tokens.create_shadcn', {
           primitives: shadcnData.primitives,
           semanticTokens: shadcnData.semantic
         });
-        spinner.succeed(`Added shadcn colors: ${data.primCount} primitives + ${data.semCount} semantic tokens`);
+        finishSuccess(ctx, spinner, `Added shadcn colors: ${data.primCount} primitives + ${data.semCount} semantic tokens`, {
+          preset: 'shadcn',
+          primitiveCount: data.primCount,
+          semanticCount: data.semCount,
+        });
       } catch (error) {
-        spinner.fail('Failed to add shadcn');
-        console.error(chalk.red(error.message));
+        finishError(ctx, spinner, 'Failed to add shadcn', error, {
+          preset: 'shadcn',
+          error: error.message,
+        });
       }
     } else if (presetLower === 'radix') {
-      const spinner = ora('Adding Radix UI colors...').start();
+      const spinner = ctx.startSpinner('Adding Radix UI colors...');
       const radixColors = loadPalette('radix');
       try {
         const { data } = await ctx.command('tokens.create_palette', {
           colors: radixColors,
           collectionName: 'radix/colors'
         });
-        spinner.succeed(`Added Radix UI colors: ${data.created} colors`);
+        finishSuccess(ctx, spinner, `Added Radix UI colors: ${data.created} colors`, {
+          preset: 'radix',
+          created: data.created,
+          collection: data.collection,
+        });
       } catch (error) {
-        spinner.fail('Failed to add Radix colors');
-        console.error(chalk.red(error.message));
+        finishError(ctx, spinner, 'Failed to add Radix colors', error, {
+          preset: 'radix',
+          error: error.message,
+        });
       }
     } else {
-      console.log(chalk.red(`Unknown preset: ${preset}`));
+      ctx.logError(`Unknown preset: ${preset}`, {
+        preset,
+        availablePresets: ['shadcn', 'radix'],
+      });
+      process.exitCode = 1;
     }
   }
 }
@@ -128,7 +236,7 @@ class TokensSpacingCommand extends Command {
   ];
 
   async execute(ctx, opts) {
-    const spinner = ora('Creating spacing scale...').start();
+    const spinner = ctx.startSpinner('Creating spacing scale...');
     const spacings = {
       '0': 0, '0.5': 2, '1': 4, '1.5': 6, '2': 8, '2.5': 10,
       '3': 12, '3.5': 14, '4': 16, '5': 20, '6': 24, '7': 28,
@@ -143,9 +251,18 @@ class TokensSpacingCommand extends Command {
         collectionName: opts.collection,
         prefix: 'spacing'
       });
-      spinner.succeed(`Created ${data.created} spacing variables`);
+      finishSuccess(ctx, spinner, `Created ${data.created} spacing variables`, {
+        preset: 'spacing',
+        created: data.created,
+        collection: opts.collection,
+        prefix: 'spacing',
+      });
     } catch (error) {
-      spinner.fail('Failed to create spacing scale');
+      finishError(ctx, spinner, 'Failed to create spacing scale', error, {
+        preset: 'spacing',
+        collection: opts.collection,
+        error: error.message,
+      });
     }
   }
 }
@@ -158,7 +275,7 @@ class TokensRadiiCommand extends Command {
   ];
 
   async execute(ctx, opts) {
-    const spinner = ora('Creating border radii...').start();
+    const spinner = ctx.startSpinner('Creating border radii...');
     const radii = {
       'none': 0, 'sm': 2, 'default': 4, 'md': 6, 'lg': 8,
       'xl': 12, '2xl': 16, '3xl': 24, 'full': 9999
@@ -170,9 +287,18 @@ class TokensRadiiCommand extends Command {
         collectionName: opts.collection,
         prefix: 'radius'
       });
-      spinner.succeed(`Created ${data.created} radius variables`);
+      finishSuccess(ctx, spinner, `Created ${data.created} radius variables`, {
+        preset: 'radii',
+        created: data.created,
+        collection: opts.collection,
+        prefix: 'radius',
+      });
     } catch (error) {
-      spinner.fail('Failed to create radii');
+      finishError(ctx, spinner, 'Failed to create radii', error, {
+        preset: 'radii',
+        collection: opts.collection,
+        error: error.message,
+      });
     }
   }
 }
@@ -193,7 +319,7 @@ class TokensImportCommand extends Command {
       return;
     }
 
-    const spinner = ora('Importing tokens...').start();
+    const spinner = ctx.startSpinner('Importing tokens...');
     const collectionName = opts.collection || 'Imported Tokens';
 
     try {
@@ -201,10 +327,17 @@ class TokensImportCommand extends Command {
         colors: tokensData,
         collectionName
       });
-      spinner.succeed(`Imported ${data.created} tokens into ${data.collection}`);
+      finishSuccess(ctx, spinner, `Imported ${data.created} tokens into ${data.collection}`, {
+        imported: data.created,
+        collection: data.collection,
+        file,
+      });
     } catch (error) {
-      spinner.fail('Failed to import tokens');
-      console.error(error.message);
+      finishError(ctx, spinner, 'Failed to import tokens', error, {
+        file,
+        collection: collectionName,
+        error: error.message,
+      });
     }
   }
 }
@@ -212,17 +345,68 @@ class TokensImportCommand extends Command {
 class TokensCreateCommand extends Command {
   name = 'tokens create [preset]';
   description = 'Interactive or preset-based token creation';
+  needsConnection = false;
 
   async execute(ctx, opts, preset) {
     if (!preset) {
-      console.log(chalk.cyan('\n  Please specify a preset to create:\n'));
-      console.log(chalk.white('    • tailwind  (Full color palette)'));
-      console.log(chalk.white('    • shadcn    (UI primitives)'));
-      console.log(chalk.white('    • spacing   (4px base scale)'));
-      console.log(chalk.white('    • radii     (Border corner scale)'));
-      console.log(chalk.gray('\n  Example: figma-gemini-cli tokens create tailwind\n'));
+      ctx.output(
+        { availablePresets: CREATE_PRESET_OPTIONS },
+        () => {
+          console.log(chalk.cyan('\n  Please specify a preset to create:\n'));
+          console.log(chalk.white('    • material3 (Layered tokens + text styles)'));
+          console.log(chalk.white('    • tailwind  (Full color palette)'));
+          console.log(chalk.white('    • shadcn    (UI primitives)'));
+          console.log(chalk.white('    • spacing   (4px base scale)'));
+          console.log(chalk.white('    • radii     (Border corner scale)'));
+          console.log(chalk.gray('\n  Example: figma-gemini-cli tokens create material3\n'));
+        }
+      );
       return;
     }
+
+    const presetLower = preset.toLowerCase();
+    const health = await checkHealth();
+    if (health.status !== 'ok' || !health.plugin) {
+      process.exitCode = 1;
+      ctx.logError('Not connected to Figma. Connect first to create token presets.', {
+        connected: false,
+        daemonRunning: health.status === 'ok',
+        pluginConnected: Boolean(health.plugin),
+        preset,
+      });
+      return;
+    }
+
+    if (presetLower === 'material3') {
+      await new TokensMaterial3Command().execute(ctx, {
+        prefix: 'm3',
+        fontFamily: 'Roboto',
+        styles: true,
+      });
+      return;
+    }
+    if (presetLower === 'tailwind') {
+      await new TokensTailwindCommand().execute(ctx, { collection: 'Color - Primitive' });
+      return;
+    }
+    if (presetLower === 'shadcn') {
+      await new TokensShadcnCommand().execute(ctx, { collection: 'shadcn/primitives' });
+      return;
+    }
+    if (presetLower === 'spacing') {
+      await new TokensSpacingCommand().execute(ctx, { collection: 'Spacing' });
+      return;
+    }
+    if (presetLower === 'radii') {
+      await new TokensRadiiCommand().execute(ctx, { collection: 'Radii' });
+      return;
+    }
+
+    process.exitCode = 1;
+    ctx.logError(`Unknown token preset: ${preset}`, {
+      preset,
+      availablePresets: CREATE_PRESET_OPTIONS,
+    });
   }
 }
 
@@ -230,6 +414,7 @@ export default [
   new TokensClearCommand(),
   new TokensTailwindCommand(),
   new TokensShadcnCommand(),
+  new TokensMaterial3Command(),
   new TokensPresetCommand(),
   new TokensSpacingCommand(),
   new TokensRadiiCommand(),

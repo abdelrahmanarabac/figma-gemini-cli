@@ -2,8 +2,6 @@ import { Command } from '../cli/command.js';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import chalk from 'chalk';
-import ora from 'ora';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const tailwindPath = join(__dirname, '..', 'data', 'palettes', 'tailwind.json');
@@ -21,7 +19,7 @@ class TokensPickCommand extends Command {
   }
 
   async execute(ctx, options, ...colors) {
-    const spinner = ora('Surgically picking tokens...').start();
+    const spinner = ctx.startSpinner('Surgically picking tokens...');
     try {
       const palette = JSON.parse(readFileSync(tailwindPath, 'utf8'));
       const toCreate = {};
@@ -40,7 +38,13 @@ class TokensPickCommand extends Command {
       }
 
       if (Object.keys(toCreate).length === 0) {
-        spinner.fail('No valid tokens selected.');
+        process.exitCode = 1;
+        spinner.fail('No valid tokens selected.', {
+          success: false,
+          requested: targetColors,
+          collection: options.collection,
+          error: 'No valid tokens selected.',
+        });
         return;
       }
 
@@ -49,10 +53,25 @@ class TokensPickCommand extends Command {
         collectionName: options.collection
       });
 
-      spinner.succeed(`Surgically created ${data.created} primitives in "${options.collection}"`);
+      const payload = {
+        success: true,
+        requested: targetColors,
+        collection: options.collection,
+        created: data.created,
+      };
+      if (ctx.isJson) {
+        ctx.logSuccess(`Surgically created ${data.created} primitives in "${options.collection}"`, payload);
+      } else {
+        spinner.succeed(`Surgically created ${data.created} primitives in "${options.collection}"`);
+      }
     } catch (err) {
-      spinner.fail('Pick failed');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Pick failed', {
+        success: false,
+        requested: Array.isArray(colors[0]) ? colors[0] : colors,
+        collection: options.collection,
+        error: err.message,
+      });
     }
   }
 }

@@ -90,6 +90,20 @@ const NUMERIC_PROPS = new Set([
     'blur', 'backdropBlur', 'letterSpacing', 'lineHeight', 'complexity'
 ]);
 
+const AUTO_LAYOUT_ONLY_PROPS = [
+    'itemSpacing',
+    'padding',
+    'paddingHorizontal',
+    'paddingVertical',
+    'paddingTop',
+    'paddingRight',
+    'paddingBottom',
+    'paddingLeft',
+    'primaryAxisAlignItems',
+    'counterAxisAlignItems',
+    'layoutWrap',
+];
+
 function transformPropValue(key, value, props) {
     if (key === 'layoutMode') {
         if (value === 'row') return 'HORIZONTAL';
@@ -424,6 +438,9 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
 
         const type = COMPONENT_MAP[tagName] || 'FRAME';
         const props = parseProps(propsStr);
+        if (tagName === 'AutoLayout' && props.layoutMode === undefined) {
+            props.layoutMode = 'VERTICAL';
+        }
         const id = `${idPrefix}tmp_${timestamp}_${counter.value++}`;
 
         const cmd = {
@@ -515,9 +532,216 @@ export function parseJSXStream(jsxString, idPrefix = "") {
     return { generator, errors };
 }
 
-export function parseJSX(jsxString, idPrefix = "") {
+function inferDiagnosticCode(message) {
+    if (message.startsWith('Unclosed TEXT tag:')) return 'UNCLOSED_TEXT_TAG';
+    if (message.startsWith('Unclosed SVG tag:')) return 'UNCLOSED_SVG_TAG';
+    if (message.startsWith('Unclosed tag:')) return 'UNCLOSED_TAG';
+    return 'PARSE_ERROR';
+}
+
+function createDiagnostic(code, message, extra = {}) {
+    return {
+        code,
+        severity: 'error',
+        message,
+        ...extra,
+    };
+}
+
+function hasAutoLayout(props = {}) {
+    return props.layoutMode === 'HORIZONTAL' || props.layoutMode === 'VERTICAL';
+}
+
+function buildStructuralDiagnostics(errors, commands, jsxString) {
+    const diagnostics = errors.map(message => ({
+        code: inferDiagnosticCode(message),
+        severity: 'error',
+        message,
+    }));
+
+    if (typeof jsxString === 'string' && jsxString.trim() !== '' && commands.length === 0) {
+        diagnostics.push({
+            code: 'EMPTY_OUTPUT',
+            severity: 'error',
+            message: 'JSX did not produce any commands.',
+        });
+    }
+
+    return diagnostics;
+}
+
+function buildSemanticDiagnostics(ast) {
+    const diagnostics = [];
+
+    function visit(node, parent = null) {
+        const props = node.props || {};
+        const nodeName = props.name || node.type;
+        const isAutoLayout = hasAutoLayout(props);
+        const hasAutoLayoutParent = Boolean(parent && hasAutoLayout(parent.props));
+        const autoLayoutProps = AUTO_LAYOUT_ONLY_PROPS.filter(prop => props[prop] !== undefined);
+
+        if (autoLayoutProps.length > 0 && !isAutoLayout) {
+            diagnostics.push(createDiagnostic(
+                'AUTO_LAYOUT_PROPS_REQUIRE_FLEX',
+                `${nodeName} uses auto-layout props (${autoLayoutProps.join(', ')}) without flex={row|col} or <AutoLayout>.`,
+                {
+                    nodeId: node.id,
+                    nodeName,
+                    nodeType: node.type,
+                    relatedProps: autoLayoutProps,
+                },
+            ));
+        }
+
+        if (props.width === 'fill' && !hasAutoLayoutParent) {
+            diagnostics.push(createDiagnostic(
+                'FILL_REQUIRES_AUTO_LAYOUT_PARENT',
+                `${nodeName} uses w={fill} without an auto-layout parent.`,
+                {
+                    nodeId: node.id,
+                    nodeName,
+                    nodeType: node.type,
+                    prop: 'width',
+                },
+            ));
+        }
+
+        if (props.height === 'fill' && !hasAutoLayoutParent) {
+            diagnostics.push(createDiagnostic(
+                'FILL_REQUIRES_AUTO_LAYOUT_PARENT',
+                `${nodeName} uses h={fill} without an auto-layout parent.`,
+                {
+                    nodeId: node.id,
+                    nodeName,
+                    nodeType: node.type,
+                    prop: 'height',
+                },
+            ));
+        }
+
+        const hugProps = [];
+        if (props.width === 'hug') hugProps.push('width');
+        if (props.height === 'hug') hugProps.push('height');
+
+        const canUseHug = node.type === 'TEXT' || isAutoLayout || hasAutoLayoutParent;
+        if (hugProps.length > 0 && !canUseHug) {
+            diagnostics.push(createDiagnostic(
+                'HUG_REQUIRES_AUTO_LAYOUT_CONTEXT',
+                `${nodeName} uses ${hugProps.map(prop => `${prop === 'width' ? 'w' : 'h'}={hug}`).join(' and ')} outside a valid auto-layout context.`,
+                {
+                    nodeId: node.id,
+                    nodeName,
+                    nodeType: node.type,
+                    relatedProps: hugProps,
+                },
+            ));
+        }
+
+        for (const child of node.children) {
+            visit(child, node);
+        }
+    }
+
+    for (const root of ast) {
+        visit(root, null);
+    }
+
+    return diagnostics;
+}
+
+function buildDiagnostics(errors, commands, ast, jsxString) {
+    return [
+        ...buildStructuralDiagnostics(errors, commands, jsxString),
+        ...buildSemanticDiagnostics(ast),
+    ];
+}
+
+function buildAstFromCommands(commands) {
+    const nodes = new Map();
+    const roots = [];
+
+    for (const command of commands) {
+        if (command.command !== 'node.create') continue;
+
+        const node = {
+            id: command.params.id,
+            type: command.params.type,
+            props: { ...(command.params.props || {}) },
+            children: [],
+        };
+        nodes.set(node.id, node);
+    }
+
+    for (const command of commands) {
+        if (command.command !== 'node.create') continue;
+
+        const node = nodes.get(command.params.id);
+        const parentId = command.params.parentId;
+
+        if (parentId && nodes.has(parentId)) {
+            nodes.get(parentId).children.push(node);
+        } else {
+            roots.push(node);
+        }
+    }
+
+    return roots;
+}
+
+function collectAstMetadata(ast, diagnostics) {
+    let nodeCount = 0;
+    let textNodeCount = 0;
+    let maxDepth = 0;
+
+    function visit(node, depth = 1) {
+        nodeCount++;
+        if (node.type === 'TEXT') textNodeCount++;
+        if (depth > maxDepth) maxDepth = depth;
+        for (const child of node.children) {
+            visit(child, depth + 1);
+        }
+    }
+
+    for (const root of ast) {
+        visit(root, 1);
+    }
+
+    return {
+        rootCount: ast.length,
+        nodeCount,
+        textNodeCount,
+        maxDepth,
+        diagnosticCount: diagnostics.length,
+    };
+}
+
+export function compileJSX(jsxString, idPrefix = "") {
     const { generator, errors } = parseJSXStream(jsxString, idPrefix);
-    return { commands: Array.from(generator), errors };
+    const commands = Array.from(generator);
+    const ast = buildAstFromCommands(commands);
+    const diagnostics = buildDiagnostics(errors, commands, ast, jsxString);
+    const metadata = collectAstMetadata(ast, diagnostics);
+
+    return {
+        ok: diagnostics.every(diagnostic => diagnostic.severity !== 'error'),
+        ast,
+        commands,
+        errors,
+        diagnostics,
+        metadata,
+    };
+}
+
+export function parseJSX(jsxString, idPrefix = "") {
+    const result = compileJSX(jsxString, idPrefix);
+    return {
+        commands: result.commands,
+        errors: result.errors,
+        diagnostics: result.diagnostics,
+        metadata: result.metadata,
+        ast: result.ast,
+        ok: result.ok,
+    };
 }
 
 export function toBatch(commands) {

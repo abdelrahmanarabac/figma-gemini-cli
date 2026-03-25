@@ -1,5 +1,4 @@
 import { Command } from '../cli/command.js';
-import ora from 'ora';
 
 class VarSetValueCommand extends Command {
   name = 'var value <variableName> <modeName> <value>';
@@ -7,7 +6,7 @@ class VarSetValueCommand extends Command {
   needsConnection = true;
 
   async execute(ctx, options, variableName, modeName, value) {
-    const spinner = ora(`Setting value for "${variableName}" in "${modeName}"...`).start();
+    const spinner = ctx.startSpinner(`Setting value for "${variableName}" in "${modeName}"...`);
     try {
       const code = `
         const varRef = ${JSON.stringify(variableName)};
@@ -57,12 +56,37 @@ class VarSetValueCommand extends Command {
       `;
       
       const result = await ctx.eval(code);
-      spinner.stop();
-      if (result.success) ctx.logSuccess('Value set successfully.');
-      else ctx.logError(result.error);
+      if (result.success) {
+        const payload = {
+          success: true,
+          variableName,
+          modeName,
+          value,
+        };
+        if (ctx.isJson) {
+          ctx.logSuccess('Value set successfully.', payload);
+        } else {
+          spinner.succeed('Value set successfully.');
+        }
+      } else {
+        process.exitCode = 1;
+        spinner.fail(result.error, {
+          success: false,
+          variableName,
+          modeName,
+          value,
+          error: result.error,
+        });
+      }
     } catch (err) {
-      spinner.fail('Operation failed');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Operation failed', {
+        success: false,
+        variableName,
+        modeName,
+        value,
+        error: err.message,
+      });
     }
   }
 }

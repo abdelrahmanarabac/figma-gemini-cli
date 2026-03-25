@@ -4,17 +4,18 @@ import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { readFileSync, existsSync, unlinkSync } from 'fs';
 import chalk from 'chalk';
+import { getDaemonPort, getDaemonUrl } from './daemon-config.js';
 
 const IS_WINDOWS = platform() === 'win32';
 const IS_MAC = platform() === 'darwin';
 
-const DAEMON_PORT = 3456;
 const DAEMON_PID_FILE = join(homedir(), '.figma-cli-daemon.pid');
 const DAEMON_LOG_FILE = join(homedir(), '.figma-cli-daemon.log');
 
 export async function isDaemonRunning() {
+  const daemonPort = getDaemonPort();
   try {
-    const res = await fetch(`http://127.0.0.1:${DAEMON_PORT}/health`, {
+    const res = await fetch(`http://127.0.0.1:${daemonPort}/health`, {
       signal: AbortSignal.timeout(500)
     });
     return res.status === 200;
@@ -29,7 +30,7 @@ export function cleanStaleDaemon() {
 }
 
 export async function daemonExec(action, data = {}) {
-  const response = await fetch(`http://127.0.0.1:${DAEMON_PORT}/command`, {
+  const response = await fetch(`${getDaemonUrl()}/command`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ command: action, params: data }),
@@ -63,12 +64,17 @@ export async function fastRender(jsx) {
 export function startDaemon(force = false) {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const daemonPath = join(__dirname, '..', 'transport', 'daemon.js');
+  const daemonPort = getDaemonPort();
 
   cleanStaleDaemon();
 
   const proc = spawn('node', [daemonPath], {
     detached: true,
-    stdio: 'ignore'
+    stdio: 'ignore',
+    env: {
+      ...process.env,
+      DAEMON_PORT: String(daemonPort),
+    }
   });
 
   proc.unref();

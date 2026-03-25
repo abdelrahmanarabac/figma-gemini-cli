@@ -42,7 +42,11 @@ export class Orchestrator {
 
     // Detect primary action
     let action = 'generate';
-    if (lower.startsWith('audit') || lower.includes('check')) action = 'audit';
+    if (lower.startsWith('test') || lower.includes('smoke') || lower.includes('regression') || lower.includes('snapshot')) action = 'test';
+    else if (lower.startsWith('audit') || lower.includes('check')) action = 'audit';
+    else if (lower.startsWith('inspect')) action = 'inspect';
+    else if (lower === 'get' || lower.startsWith('get ')) action = 'get';
+    else if (lower.startsWith('find')) action = 'find';
     else if (lower.startsWith('render') || lower.includes('render')) action = 'render';
     else if (lower.startsWith('update') || lower.includes('update')) action = 'update';
     else if (lower.includes('token') || lower.includes('color') || lower.includes('palette')) action = 'tokens';
@@ -60,6 +64,7 @@ export class Orchestrator {
       icon: ['icon', 'svg', 'illustration', 'image', 'chart', 'graph'],
       validation: ['audit', 'check', 'validate', 'accessibility', 'a11y', 'contrast'],
       interaction: ['hover', 'click', 'prototype', 'animation', 'transition'],
+      testing: ['test', 'smoke', 'regression', 'snapshot', 'qa'],
     };
 
     for (const [tag, keywords] of Object.entries(tagMap)) {
@@ -115,7 +120,7 @@ export class Orchestrator {
     this.trace = [];
 
     // 1. Parse intent
-    const intent = this.parseIntent(rawInput, context);
+    const intent = this.parseIntent(rawInput, { ...context, ...options });
     this._log('intent', `Action: ${intent.action}, Tags: [${intent.tags.join(', ')}]`);
 
     // 2. Gate — select relevant experts
@@ -235,6 +240,7 @@ export class Orchestrator {
         if (!result.success && expert.name === 'guardian') {
           // Guardian failure is critical
           this._log('error', `${expert.name} failed: ${(result.errors || []).join('; ')}`);
+          overallSuccess = false;
         }
       } catch (err) {
         this._log('error', `${expert.name} threw: ${err.message}`);

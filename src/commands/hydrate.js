@@ -1,8 +1,6 @@
 import { Command } from '../cli/command.js';
 import { readFileSync } from 'fs';
 import path from 'path';
-import chalk from 'chalk';
-import ora from 'ora';
 
 class HydrateCommand extends Command {
   name = 'hydrate <file> <target>';
@@ -18,7 +16,7 @@ class HydrateCommand extends Command {
   }
 
   async execute(ctx, options, file, target) {
-    const spinner = ora(`Reading data from ${file}...`).start();
+    const spinner = ctx.startSpinner(`Reading data from ${file}...`);
     
     try {
       // 1. Load and parse data
@@ -34,30 +32,57 @@ class HydrateCommand extends Command {
       }
 
       if (!targetId) {
-        spinner.fail(`Target component "${target}" not found.`);
+        process.exitCode = 1;
+        spinner.fail(`Target component "${target}" not found.`, {
+          success: false,
+          file,
+          target,
+          error: 'Target component not found.',
+        });
         return;
       }
 
       // 3. Send hydration command
       spinner.text = `Injecting data into ${target}...`;
-      const { sendCommand } = await import('../transport/bridge.js');
-      const result = await sendCommand('node.hydrate', {
+      const result = await ctx.command('node.hydrate', {
         id: targetId,
         data: data,
         clone: options.clone,
         gap: parseInt(options.gap, 10)
       });
-
-      spinner.stop();
+      const payload = {
+        success: result?.data?.status === 'hydrated',
+        file,
+        filePath,
+        target,
+        targetId,
+        clone: Boolean(options.clone),
+        gap: parseInt(options.gap, 10),
+        count: result?.data?.count || 0,
+      };
 
       if (result && result.data && result.data.status === 'hydrated') {
-        ctx.logSuccess(`Successfully hydrated ${result.data.count} records into "${target}"`);
+        if (ctx.isJson) {
+          ctx.logSuccess(`Successfully hydrated ${result.data.count} records into "${target}"`, payload);
+        } else {
+          spinner.succeed(`Successfully hydrated ${result.data.count} records into "${target}"`);
+        }
       } else {
-        ctx.logError(`Hydration failed: ${result.error || 'Unknown error'}`);
+        process.exitCode = 1;
+        spinner.fail(`Hydration failed: ${result.error || 'Unknown error'}`, {
+          ...payload,
+          success: false,
+          error: result?.error || 'Unknown error',
+        });
       }
     } catch (err) {
-      spinner.fail('Hydration error');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Hydration error', {
+        success: false,
+        file,
+        target,
+        error: err.message,
+      });
     }
   }
 }

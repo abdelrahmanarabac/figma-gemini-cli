@@ -8,7 +8,7 @@ class VarListCommand extends Command {
   needsConnection = true;
 
   async execute(ctx) {
-    const spinner = ora('Fetching variables...').start();
+    const spinner = ctx.isInteractive ? ora('Fetching variables...').start() : null;
     try {
       const code = `
         const collections = await figma.variables.getLocalVariableCollectionsAsync();
@@ -31,29 +31,42 @@ class VarListCommand extends Command {
       `;
       
       const result = await ctx.eval(code);
-      spinner.stop();
+      spinner?.stop();
+      const collections = result?.collections || [];
+      const variables = result?.variables || [];
+      const payload = {
+        collections,
+        variables,
+        collectionCount: collections.length,
+        variableCount: variables.length,
+      };
 
-      if (!result || result.collections.length === 0) {
-        console.log(chalk.yellow('\n  No variable collections found.\n'));
+      if (collections.length === 0) {
+        ctx.output(
+          { ...payload, message: 'No variable collections found.' },
+          () => console.log(chalk.yellow('\n  No variable collections found.\n'))
+        );
         return;
       }
 
-      console.log(chalk.cyan(`\n  Variable Collections (${result.collections.length}):\n`));
-      
-      result.collections.forEach(col => {
-        const colVars = result.variables.filter(v => v.collectionId === col.id);
-        console.log(chalk.white(`  • ${chalk.bold(col.name)} (${col.id}) [${colVars.length} variables]`));
-        console.log(chalk.gray(`    Modes: ${col.modes.map(m => m.name).join(', ')}`));
-        
-        if (colVars.length > 0) {
-          colVars.forEach(v => {
-            console.log(chalk.gray(`    - ${v.name} (${v.type}) [${v.id}]`));
-          });
-        }
-        console.log();
+      ctx.output(payload, () => {
+        console.log(chalk.cyan(`\n  Variable Collections (${collections.length}):\n`));
+
+        collections.forEach(col => {
+          const colVars = variables.filter(v => v.collectionId === col.id);
+          console.log(chalk.white(`  • ${chalk.bold(col.name)} (${col.id}) [${colVars.length} variables]`));
+          console.log(chalk.gray(`    Modes: ${col.modes.map(m => m.name).join(', ')}`));
+
+          if (colVars.length > 0) {
+            colVars.forEach(v => {
+              console.log(chalk.gray(`    - ${v.name} (${v.type}) [${v.id}]`));
+            });
+          }
+          console.log();
+        });
       });
     } catch (err) {
-      spinner.fail('Failed to list variables');
+      spinner?.fail('Failed to list variables');
       ctx.logError(err.message);
     }
   }
@@ -73,7 +86,7 @@ class VarCreateCommand extends Command {
   }
 
   async execute(ctx, options, name, type, value) {
-    const spinner = ora(`Creating variable "${name}"...`).start();
+    const spinner = ctx.startSpinner(`Creating variable "${name}"...`);
     try {
       const code = `
         const colRef = ${JSON.stringify(options.collection)};
@@ -119,12 +132,44 @@ class VarCreateCommand extends Command {
       `;
       
       const result = await ctx.eval(code);
-      spinner.stop();
-      if (result.success) ctx.logSuccess(`Created variable ${name} (${result.id})`);
-      else ctx.logError(result.error);
+      if (result.success) {
+        const payload = {
+          success: true,
+          id: result.id,
+          name,
+          type: type.toUpperCase(),
+          value,
+          collection: options.collection,
+          alias: Boolean(options.alias),
+        };
+        if (ctx.isJson) {
+          ctx.logSuccess(`Created variable ${name} (${result.id})`, payload);
+        } else {
+          spinner.succeed(`Created variable ${name} (${result.id})`);
+        }
+      } else {
+        process.exitCode = 1;
+        spinner.fail(result.error, {
+          success: false,
+          name,
+          type: type.toUpperCase(),
+          value,
+          collection: options.collection,
+          alias: Boolean(options.alias),
+          error: result.error,
+        });
+      }
     } catch (err) {
-      spinner.fail('Creation failed');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Creation failed', {
+        success: false,
+        name,
+        type: type.toUpperCase(),
+        value,
+        collection: options.collection,
+        alias: Boolean(options.alias),
+        error: err.message,
+      });
     }
   }
 }
@@ -135,7 +180,7 @@ class VarRenameCommand extends Command {
   needsConnection = true;
 
   async execute(ctx, options, idOrName, newName) {
-    const spinner = ora(`Renaming variable to "${newName}"...`).start();
+    const spinner = ctx.startSpinner(`Renaming variable to "${newName}"...`);
     try {
       const code = `
         const ref = ${JSON.stringify(idOrName)};
@@ -147,10 +192,35 @@ class VarRenameCommand extends Command {
         return { success: true };
       `;
       const result = await ctx.eval(code);
-      spinner.stop();
-      if (result.success) ctx.logSuccess('Variable renamed successfully.');
-      else ctx.logError(result.error);
-    } catch (err) { ctx.logError(err.message); }
+      if (result.success) {
+        const payload = {
+          success: true,
+          idOrName,
+          newName,
+        };
+        if (ctx.isJson) {
+          ctx.logSuccess('Variable renamed successfully.', payload);
+        } else {
+          spinner.succeed('Variable renamed successfully.');
+        }
+      } else {
+        process.exitCode = 1;
+        spinner.fail(result.error, {
+          success: false,
+          idOrName,
+          newName,
+          error: result.error,
+        });
+      }
+    } catch (err) {
+      process.exitCode = 1;
+      spinner.fail('Variable rename failed', {
+        success: false,
+        idOrName,
+        newName,
+        error: err.message,
+      });
+    }
   }
 }
 
@@ -160,7 +230,7 @@ class VarDeleteCommand extends Command {
   needsConnection = true;
 
   async execute(ctx, options, idOrName) {
-    const spinner = ora('Deleting variable...').start();
+    const spinner = ctx.startSpinner('Deleting variable...');
     try {
       const code = `
         const ref = ${JSON.stringify(idOrName)};
@@ -171,10 +241,32 @@ class VarDeleteCommand extends Command {
         return { success: true };
       `;
       const result = await ctx.eval(code);
-      spinner.stop();
-      if (result.success) ctx.logSuccess('Variable deleted.');
-      else ctx.logError(result.error);
-    } catch (err) { ctx.logError(err.message); }
+      if (result.success) {
+        const payload = {
+          success: true,
+          idOrName,
+        };
+        if (ctx.isJson) {
+          ctx.logSuccess('Variable deleted.', payload);
+        } else {
+          spinner.succeed('Variable deleted.');
+        }
+      } else {
+        process.exitCode = 1;
+        spinner.fail(result.error, {
+          success: false,
+          idOrName,
+          error: result.error,
+        });
+      }
+    } catch (err) {
+      process.exitCode = 1;
+      spinner.fail('Variable deletion failed', {
+        success: false,
+        idOrName,
+        error: err.message,
+      });
+    }
   }
 }
 
@@ -184,7 +276,7 @@ class ColCreateCommand extends Command {
   needsConnection = true;
 
   async execute(ctx, options, name) {
-    const spinner = ora(`Creating collection "${name}"...`).start();
+    const spinner = ctx.startSpinner(`Creating collection "${name}"...`);
     try {
       const code = `
         const n = ${JSON.stringify(name)};
@@ -192,9 +284,26 @@ class ColCreateCommand extends Command {
         return { success: true, id: col.id };
       `;
       const result = await ctx.eval(code);
-      spinner.stop();
-      if (result.success) ctx.logSuccess(`Created collection ${name} (${result.id})`);
-    } catch (err) { ctx.logError(err.message); }
+      if (result.success) {
+        const payload = {
+          success: true,
+          id: result.id,
+          name,
+        };
+        if (ctx.isJson) {
+          ctx.logSuccess(`Created collection ${name} (${result.id})`, payload);
+        } else {
+          spinner.succeed(`Created collection ${name} (${result.id})`);
+        }
+      }
+    } catch (err) {
+      process.exitCode = 1;
+      spinner.fail('Collection creation failed', {
+        success: false,
+        name,
+        error: err.message,
+      });
+    }
   }
 }
 
@@ -204,7 +313,7 @@ class ColRenameCommand extends Command {
   needsConnection = true;
 
   async execute(ctx, options, idOrName, newName) {
-    const spinner = ora(`Renaming collection to "${newName}"...`).start();
+    const spinner = ctx.startSpinner(`Renaming collection to "${newName}"...`);
     try {
       const code = `
         const ref = ${JSON.stringify(idOrName)};
@@ -216,10 +325,35 @@ class ColRenameCommand extends Command {
         return { success: true };
       `;
       const result = await ctx.eval(code);
-      spinner.stop();
-      if (result.success) ctx.logSuccess('Collection renamed.');
-      else ctx.logError(result.error);
-    } catch (err) { ctx.logError(err.message); }
+      if (result.success) {
+        const payload = {
+          success: true,
+          idOrName,
+          newName,
+        };
+        if (ctx.isJson) {
+          ctx.logSuccess('Collection renamed.', payload);
+        } else {
+          spinner.succeed('Collection renamed.');
+        }
+      } else {
+        process.exitCode = 1;
+        spinner.fail(result.error, {
+          success: false,
+          idOrName,
+          newName,
+          error: result.error,
+        });
+      }
+    } catch (err) {
+      process.exitCode = 1;
+      spinner.fail('Collection rename failed', {
+        success: false,
+        idOrName,
+        newName,
+        error: err.message,
+      });
+    }
   }
 }
 
@@ -229,7 +363,7 @@ class ColDeleteCommand extends Command {
   needsConnection = true;
 
   async execute(ctx, options, idOrName) {
-    const spinner = ora('Deleting collection...').start();
+    const spinner = ctx.startSpinner('Deleting collection...');
     try {
       const code = `
         const ref = ${JSON.stringify(idOrName)};
@@ -240,10 +374,32 @@ class ColDeleteCommand extends Command {
         return { success: true };
       `;
       const result = await ctx.eval(code);
-      spinner.stop();
-      if (result.success) ctx.logSuccess('Collection deleted.');
-      else ctx.logError(result.error);
-    } catch (err) { ctx.logError(err.message); }
+      if (result.success) {
+        const payload = {
+          success: true,
+          idOrName,
+        };
+        if (ctx.isJson) {
+          ctx.logSuccess('Collection deleted.', payload);
+        } else {
+          spinner.succeed('Collection deleted.');
+        }
+      } else {
+        process.exitCode = 1;
+        spinner.fail(result.error, {
+          success: false,
+          idOrName,
+          error: result.error,
+        });
+      }
+    } catch (err) {
+      process.exitCode = 1;
+      spinner.fail('Collection deletion failed', {
+        success: false,
+        idOrName,
+        error: err.message,
+      });
+    }
   }
 }
 

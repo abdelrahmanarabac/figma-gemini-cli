@@ -2,7 +2,6 @@ import { Command } from '../cli/command.js';
 import { readFileSync, existsSync } from 'fs';
 import { resolve } from 'path';
 import chalk from 'chalk';
-import ora from 'ora';
 
 class RunCommand extends Command {
   name = 'run <file>';
@@ -17,7 +16,7 @@ class RunCommand extends Command {
       return;
     }
 
-    const spinner = ora(`Executing script: ${file}...`).start();
+    const spinner = ctx.startSpinner(`Executing script: ${file}...`);
     
     try {
       const code = readFileSync(filePath, 'utf8');
@@ -26,17 +25,34 @@ class RunCommand extends Command {
       const wrappedCode = code.includes('async') ? code : `(async () => { ${code} })()`;
       
       const result = await ctx.eval(wrappedCode);
-      
-      spinner.succeed(`Script executed successfully.`);
-      
+      const payload = {
+        file,
+        filePath,
+        executed: true,
+        result: result ?? null,
+      };
+
+      if (ctx.isJson) {
+        ctx.logSuccess('Script executed successfully.', payload);
+      } else {
+        spinner.succeed('Script executed successfully.');
+      }
+
       if (result !== undefined) {
-        console.log(chalk.gray('\n  Result:'));
-        console.log(chalk.white(JSON.stringify(result, null, 2)));
-        console.log();
+        if (!ctx.isJson) {
+          console.log(chalk.gray('\n  Result:'));
+          console.log(chalk.white(JSON.stringify(result, null, 2)));
+          console.log();
+        }
       }
     } catch (err) {
-      spinner.fail('Script execution failed');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Script execution failed', {
+        file,
+        filePath,
+        executed: false,
+        error: err.message,
+      });
     }
   }
 }

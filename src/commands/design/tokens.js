@@ -20,6 +20,7 @@ function saveWorkflow(data) {
 class DesignTokensCommand extends Command {
   name = 'design tokens';
   description = 'Configure design system tokens (Colors, Spacing, Radii)';
+  needsConnection = false;
 
   async execute(ctx) {
     const workflow = loadWorkflow();
@@ -59,10 +60,21 @@ class DesignTokensCommand extends Command {
 
     workflow.tokens = answers;
     workflow.stage = 'UI Generation';
+    workflow.timestamp = new Date().toISOString();
     saveWorkflow(workflow);
 
-    ctx.logSuccess('Design System Configured.');
-    ctx.log('Workflow Ready: Run `design generate` to build the UI in Figma.');
+    const payload = {
+      success: true,
+      stage: workflow.stage,
+      tokens: answers,
+      timestamp: workflow.timestamp,
+      nextStep: 'Run `design generate` to build the UI in Figma.',
+    };
+
+    ctx.logSuccess('Design System Configured.', payload);
+    if (!ctx.isJson) {
+      ctx.log('Workflow Ready: Run `design generate` to build the UI in Figma.');
+    }
   }
 }
 

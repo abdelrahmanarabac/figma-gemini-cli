@@ -27,7 +27,6 @@ const RULES = {
       const props = cmd.params?.props || {};
       const violations = [];
       const colorProps = ['fill', 'stroke'];
-      const semanticTokens = context.tokens?.semantic || {};
       
       for (const prop of colorProps) {
         const val = props[prop];
@@ -161,6 +160,12 @@ export class GuardianExpert extends Expert {
    * @returns {ValidationReport}
    */
   validate(commands, context = {}) {
+    const statKeyBySeverity = {
+      error: 'errors',
+      warning: 'warnings',
+      info: 'info',
+    };
+
     const report = {
       pass: true,
       totalCommands: commands.length,
@@ -183,7 +188,7 @@ export class GuardianExpert extends Expert {
               nodeName: cmd.params?.props?.name || 'unnamed',
               ...issue,
             });
-            report.stats[rule.severity]++;
+            report.stats[statKeyBySeverity[rule.severity] || 'info']++;
           }
         }
       }

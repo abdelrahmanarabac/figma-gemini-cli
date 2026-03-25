@@ -14,6 +14,7 @@ import { UXWriterExpert } from './ux-writer.js';
 import { A11yExpert } from './a11y-expert.js';
 import { ResponsiveExpert } from './responsive-expert.js';
 import { VisualExpert } from './visual-expert.js';
+import { WorkflowPlannerExpert } from './workflow-planner.js';
 import { DesignMemory } from '../memory/design-memory.js';
 
 /**
@@ -26,6 +27,7 @@ export function createAgentSystem() {
   const memory = new DesignMemory();
 
   const experts = {
+    workflowPlanner: new WorkflowPlannerExpert(),
     analyzer: new AnalyzerExpert(),
     tokenExpert: new TokenExpert(),
     visual: new VisualExpert(),

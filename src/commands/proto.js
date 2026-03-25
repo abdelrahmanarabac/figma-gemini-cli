@@ -1,6 +1,5 @@
 import { Command } from '../cli/command.js';
 import chalk from 'chalk';
-import ora from 'ora';
 
 class ProtoLinkCommand extends Command {
   name = 'proto link <source> <target>';
@@ -17,7 +16,7 @@ class ProtoLinkCommand extends Command {
   }
 
   async execute(ctx, options, source, target) {
-    const spinner = ora(`Linking "${source}" to "${target}"...`).start();
+    const spinner = ctx.startSpinner(`Linking "${source}" to "${target}"...`);
     
     try {
       const code = `
@@ -88,20 +87,43 @@ class ProtoLinkCommand extends Command {
       `;
 
       const result = await ctx.eval(code);
-      spinner.stop();
+      const payload = {
+        success: Boolean(result?.success),
+        source,
+        target,
+        trigger: options.trigger?.toUpperCase(),
+        transition: result?.transition || options.transition?.toUpperCase(),
+        duration: parseInt(options.duration, 10),
+        sourceName: result?.sourceName || null,
+        targetName: result?.targetName || null,
+      };
 
       if (result && result.success) {
-        ctx.logSuccess(`Prototype linked successfully!`);
-        console.log(chalk.gray(`    Source:     ${result.sourceName}`));
-        console.log(chalk.gray(`    Target:     ${result.targetName}`));
-        console.log(chalk.gray(`    Trigger:    ${result.trigger}`));
-        console.log(chalk.gray(`    Transition: ${result.transition} (${options.duration}ms)`));
+        if (ctx.isJson) {
+          ctx.logSuccess('Prototype linked successfully!', payload);
+        } else {
+          spinner.succeed('Prototype linked successfully!');
+          console.log(chalk.gray(`    Source:     ${result.sourceName}`));
+          console.log(chalk.gray(`    Target:     ${result.targetName}`));
+          console.log(chalk.gray(`    Trigger:    ${result.trigger}`));
+          console.log(chalk.gray(`    Transition: ${result.transition} (${options.duration}ms)`));
+        }
       } else {
-        ctx.logError(result ? result.error : "Unknown error occurred.");
+        process.exitCode = 1;
+        spinner.fail(result ? result.error : 'Unknown error occurred.', {
+          ...payload,
+          success: false,
+          error: result?.error || 'Unknown error occurred.',
+        });
       }
     } catch (err) {
-      spinner.fail('Prototype linking failed');
-      ctx.logError(err.message);
+      process.exitCode = 1;
+      spinner.fail('Prototype linking failed', {
+        success: false,
+        source,
+        target,
+        error: err.message,
+      });
     }
   }
 }

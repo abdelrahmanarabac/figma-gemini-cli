@@ -4,7 +4,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Figma](https://img.shields.io/badge/Figma-Desktop-blue.svg)](https://www.figma.com/)
 
-A professional Node.js-based command-line interface that provides direct, programmatic control over the Figma Desktop application. By utilizing a secure, local WebSocket-bridged plugin environment, it enables lightning-fast batch operations, AI-driven design generation, and advanced token management with absolute production stability.
+A professional Node.js-based command-line interface for driving Figma Desktop through a local plugin bridge. The current surface focuses on guarded rendering, template-driven MoE generation, auditing, and token workflows.
 
 ---
 
@@ -14,6 +14,8 @@ This CLI is currently **experimental and under active development**.
 Features, commands, and APIs may change frequently as the project evolves.
 
 Use it for testing, experimentation, and development workflows, but expect breaking changes between versions.
+
+FigJam commands are currently disabled and hidden from the CLI until their transport layer is implemented.
 
 ### 💡 Feedback & Support
 
@@ -33,26 +35,6 @@ Version **v18.0.0** or higher is required.
 ### 2. Figma Desktop
 The CLI interacts directly with the local Figma Desktop application.
 
-### 3. Gemini CLI
-Install the official Gemini CLI globally to enable AI-powered design features:
-
-```bash
-npm install -g @google/gemini-cli
-```
-
-Then authenticate your account:
-
-```bash
-gemini auth login
-```
-
-Verify the installation:
-```bash
-gemini --version
-```
-
----
-
 ## 📦 Full Setup
 
 Follow these steps to get the project running locally:
@@ -67,10 +49,7 @@ cd figma-gemini-cli
 # 3. Install project dependencies
 npm install
 
-# 4. Gemini
-gemini
-
-# 5. Install the Figma Plugin by
+# 4. Install the Figma Plugin by
 # - Open Figma Desktop
 # - Go to Plugins -> Development -> Import plugin from manifest...
 # - Select 'plugin/manifest.json' from this folder
@@ -91,9 +70,14 @@ gemini
    node src/index.js status
    ```
 
-3. **Generate a design via AI**:
+3. **Generate a design via the MoE pipeline**:
    ```bash
-   node src/index.js ai "Create a modern login screen for a SaaS app with dark mode"
+   node src/index.js generate "Create a modern login screen for a SaaS app with dark mode"
+   ```
+
+4. **Inspect a generation without rendering to Figma**:
+   ```bash
+   node src/index.js generate "Create a pricing page with 3 tiers" --dry-run --verbose
    ```
 
 ---
@@ -113,9 +97,10 @@ High-level commands for creating and rendering UI elements.
 
 | Command | Description | Example |
 | :--- | :--- | :--- |
-| `ai <prompt>` | Generates Figma layouts using Gemini AI. | `node src/index.js ai "Create a pricing table"` |
+| `generate <description>` | Runs the MoE generation pipeline and renders when validation passes. | `node src/index.js generate "Create a pricing table"` |
 | `render <jsx>` | Renders a JSX string directly into Figma. | `node src/index.js render '<Frame bg="#f0f" w={100} h={100} />'` |
 | `render-batch` | Executes a sequence of rendering commands from a file. | `node src/index.js render-batch ./scene.json` |
+| `audit a11y --page` | Audits text contrast on the current page. | `node src/index.js audit a11y --page` |
 
 ### 💎 Design Tokens
 Advanced management of Figma Variables and color palettes.
@@ -128,14 +113,13 @@ Advanced management of Figma Variables and color palettes.
 | `tokens clear` | **Destructive**: Wipes all local variables/collections. | `node src/index.js tokens clear` |
 | `tokens import` | Imports a JSON token file into a collection. | `node src/index.js tokens import ./my-tokens.json` |
 
-### 🛠 Utilities & FigJam
-Helper commands for documentation and collaboration.
+### 🛠 Utilities
+Helper commands for documentation and export workflows.
 
 | Command | Description | Example |
 | :--- | :--- | :--- |
 | `export-zip` | Bundles tokens and themes into a portable ZIP. | `node src/index.js export-zip -o ./backup` |
-| `fj pages` | Lists all active FigJam pages. | `node src/index.js fj pages` |
-| `fj sticky` | Creates a sticky note in FigJam. | `node src/index.js fj sticky "Meeting notes"` |
+| `send-feedback` | Sends feedback to the maintainer. | `node src/index.js send-feedback "Great tool"` |
 
 ---
 
@@ -143,7 +127,7 @@ Helper commands for documentation and collaboration.
 
 *   **`src/cli/`**: The routing and execution engine.
 *   **`src/commands/`**: Modular command definitions.
-*   **`src/core/`**: Core logic for AI and Figma communication.
+*   **`src/agents/`**: Mix-of-experts orchestration and specialist agents.
 *   **`src/transport/`**: Background daemon handling WebSocket traffic.
 *   **`src/parser/`**: JSX-to-Figma AST translation logic.
 *   **`plugin/`**: Native Figma environment bridge.

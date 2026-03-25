@@ -20,6 +20,7 @@ function saveWorkflow(data) {
 class DesignArchitectureCommand extends Command {
   name = 'design architecture';
   description = 'Define the product architecture and user flow';
+  needsConnection = false;
 
   async execute(ctx) {
     const workflow = loadWorkflow();
@@ -57,10 +58,21 @@ class DesignArchitectureCommand extends Command {
 
     workflow.architecture = answers;
     workflow.stage = 'Design System';
+    workflow.timestamp = new Date().toISOString();
     saveWorkflow(workflow);
 
-    ctx.logSuccess('Architecture Defined.');
-    ctx.log('Next: Run `design tokens` to setup the design system.');
+    const payload = {
+      success: true,
+      stage: workflow.stage,
+      architecture: answers,
+      timestamp: workflow.timestamp,
+      nextStep: 'Run `design tokens` to setup the design system.',
+    };
+
+    ctx.logSuccess('Architecture Defined.', payload);
+    if (!ctx.isJson) {
+      ctx.log('Next: Run `design tokens` to setup the design system.');
+    }
   }
 }
 
