@@ -24,6 +24,22 @@ function log(msg) {
     console.log(`[${new Date().toISOString()}] ${msg}`);
 }
 
+function checkLiveness() {
+    if (existsSync(PID_FILE)) {
+        try {
+            const oldPid = parseInt(readFileSync(PID_FILE, 'utf8'));
+            if (oldPid && !isNaN(oldPid)) {
+                process.kill(oldPid, 0); // Check if process exists
+                log(`Another daemon is already running (PID ${oldPid})`);
+                process.exit(1);
+            }
+        } catch (e) {
+            try { unlinkSync(PID_FILE); } catch (e) {} // Clean stale PID
+        }
+    }
+}
+checkLiveness();
+
 // Plugin connection state
 let pluginWs = null;
 let pluginConnected = false;
@@ -141,6 +157,19 @@ wssPlugin.on('connection', (ws) => {
     pluginWs = ws;
     pluginConnected = true;
 
+    // Heartbeat ping
+    const heartbeatParams = { alive: true };
+    ws.on('pong', () => { heartbeatParams.alive = true; });
+    const pingInterval = setInterval(() => {
+        if (!heartbeatParams.alive) {
+            log('Plugin heartbeat timeout. Terminating connection.');
+            ws.terminate();
+            return;
+        }
+        heartbeatParams.alive = false;
+        ws.ping();
+    }, 30000);
+
     ws.on('message', (raw) => {
         try {
             const msg = JSON.parse(raw);
@@ -181,6 +210,7 @@ wssPlugin.on('connection', (ws) => {
         log('Plugin disconnected');
         pluginConnected = false;
         pluginWs = null;
+        clearInterval(pingInterval);
         // Reject all pending requests
         for (const [id, pending] of pendingRequests) {
             clearTimeout(pending.timeout);
@@ -194,7 +224,14 @@ wssPlugin.on('connection', (ws) => {
     });
 });
 
-// Start listening
+httpServer.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+        log(`Port ${PORT} is already in use by another application.`);
+        process.exit(1);
+    }
+    log(`HTTP Server Error: ${err.message}`);
+});
+
 try {
     httpServer.listen(PORT, '127.0.0.1', () => {
         try { mkdirSync(CONFIG_DIR, { recursive: true }); } catch { }

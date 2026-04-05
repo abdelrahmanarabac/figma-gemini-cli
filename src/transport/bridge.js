@@ -73,9 +73,21 @@ export async function checkHealth() {
 
 /**
  * Send a batch of commands.
+ * Automatically chunks large arrays to prevent payload overflows.
  * @param {object[]} commands - Array of { command, params }
  * @returns {Promise<object>}
  */
 export async function sendBatch(commands, opts = {}) {
-    return sendCommand('batch', { commands }, { timeout: opts.timeout || 60000 });
+    if (!Array.isArray(commands) || commands.length <= 500) {
+        return sendCommand('batch', { commands }, { timeout: opts.timeout || 60000 });
+    }
+
+    const CHUNK_SIZE = 500;
+    const results = [];
+    for (let i = 0; i < commands.length; i += CHUNK_SIZE) {
+        const chunk = commands.slice(i, i + CHUNK_SIZE);
+        const res = await sendCommand('batch', { commands: chunk }, { timeout: opts.timeout || 60000 });
+        results.push(res);
+    }
+    return { status: 'ok', data: results };
 }

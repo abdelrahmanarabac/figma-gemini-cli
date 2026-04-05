@@ -5,57 +5,83 @@
  * Options: { label, w, mode }
  */
 
-import { resolveToken } from './index.js';
+import { resolveToken, resolveTokenValue, textProps } from './index.js';
 
 export const buttons = {
 
   primary(opts = {}) {
-    const { label = 'Button', w = 'hug', mode = 'Light', tokens } = opts;
-    const bg = resolveToken(tokens, 'semantic', 'color/primary', '#3b82f6');
-    const color = resolveToken(tokens, 'semantic', 'color/on-primary', '#ffffff');
-    return `<Frame name={Button_Primary} w={${w}} h={48} flex={row} bg={${bg}} rounded={12} px={24} py={12} justify={center} items={center}>
-  <Text size={16} weight={semibold} color={${color}}>${label}</Text>
+    const { label = 'Button', w = 'hug', tokens, typography } = opts;
+    const bg = resolveTokenValue(tokens, [['component', 'color/button/primary/bg'], ['semantic', 'color/primary']], '#3b82f6');
+    const color = resolveTokenValue(tokens, [['component', 'color/button/primary/text'], ['semantic', 'color/on-primary']], '#ffffff');
+    const radius = resolveTokenValue(tokens, [['component', 'radius/button'], ['radius', 'radius/full']], 12);
+    const px = resolveTokenValue(tokens, [['component', 'spacing/button/padding-inline'], ['spacing', 'spacing/lg']], 24);
+    const py = resolveTokenValue(tokens, [['component', 'spacing/button/padding-block'], ['spacing', 'spacing/sm']], 12);
+    const labelText = textProps({ typography, role: 'label/large', size: 16, weight: 'semibold', color });
+    return `<Frame name={Button_Primary} w={${w}} h={48} flex={row} bg={${bg}} rounded={${radius}} px={${px}} py={${py}} justify={center} items={center}>
+  <Text ${labelText}>${label}</Text>
 </Frame>`;
   },
 
   secondary(opts = {}) {
-    const { label = 'Button', w = 'hug', mode = 'Light', tokens } = opts;
-    const bg = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/surface-inverse', '#1e293b') : resolveToken(tokens, 'semantic', 'color/surface-elevated', '#f1f5f9');
-    const color = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/on-surface-inverse', '#e2e8f0') : resolveToken(tokens, 'semantic', 'color/on-surface', '#1e293b');
-    const border = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/border-dark', '#334155') : resolveToken(tokens, 'semantic', 'color/border', '#e2e8f0');
-    return `<Frame name={Button_Secondary} w={${w}} h={48} flex={row} bg={${bg}} rounded={12} px={24} py={12} justify={center} items={center} stroke={${border}}>
-  <Text size={16} weight={semibold} color={${color}}>${label}</Text>
+    const { label = 'Button', mode = 'Light', w = 'hug', tokens, typography } = opts;
+    const bg = resolveTokenValue(
+      tokens,
+      [['component', 'color/button/secondary/bg'], ['semantic', mode === 'Dark' ? 'color/surface-container-high' : 'color/surface-container']],
+      mode === 'Dark' ? '#1e293b' : '#f1f5f9'
+    );
+    const color = resolveTokenValue(
+      tokens,
+      [['component', 'color/button/secondary/text'], ['semantic', 'color/on-surface']],
+      mode === 'Dark' ? '#e2e8f0' : '#1e293b'
+    );
+    const border = resolveTokenValue(tokens, [['semantic', 'color/outline'], ['semantic', 'color/border']], mode === 'Dark' ? '#334155' : '#e2e8f0');
+    const radius = resolveTokenValue(tokens, [['component', 'radius/button'], ['radius', 'radius/full']], 12);
+    const px = resolveTokenValue(tokens, [['component', 'spacing/button/padding-inline'], ['spacing', 'spacing/lg']], 24);
+    const py = resolveTokenValue(tokens, [['component', 'spacing/button/padding-block'], ['spacing', 'spacing/sm']], 12);
+    const labelText = textProps({ typography, role: 'label/large', size: 16, weight: 'semibold', color });
+    return `<Frame name={Button_Secondary} w={${w}} h={48} flex={row} bg={${bg}} rounded={${radius}} px={${px}} py={${py}} justify={center} items={center} stroke={${border}}>
+  <Text ${labelText}>${label}</Text>
 </Frame>`;
   },
 
   ghost(opts = {}) {
-    const { label = 'Button', w = 'hug', mode = 'Light', tokens } = opts;
+    const { label = 'Button', mode = 'Light', w = 'hug', tokens, typography } = opts;
     const color = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/primary-light', '#93c5fd') : resolveToken(tokens, 'semantic', 'color/primary', '#3b82f6');
-    return `<Frame name={Button_Ghost} w={${w}} h={48} flex={row} rounded={12} px={24} py={12} justify={center} items={center}>
-  <Text size={16} weight={semibold} color={${color}}>${label}</Text>
+    const radius = resolveTokenValue(tokens, [['component', 'radius/button'], ['radius', 'radius/full']], 12);
+    const px = resolveTokenValue(tokens, [['component', 'spacing/button/padding-inline'], ['spacing', 'spacing/lg']], 24);
+    const py = resolveTokenValue(tokens, [['component', 'spacing/button/padding-block'], ['spacing', 'spacing/sm']], 12);
+    const labelText = textProps({ typography, role: 'label/large', size: 16, weight: 'semibold', color });
+    return `<Frame name={Button_Ghost} w={${w}} h={48} flex={row} rounded={${radius}} px={${px}} py={${py}} justify={center} items={center}>
+  <Text ${labelText}>${label}</Text>
 </Frame>`;
   },
 
   destructive(opts = {}) {
-    const { label = 'Delete', w = 'hug', mode = 'Light', tokens } = opts;
-    const bg = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/destructive-dark', '#dc2626') : resolveToken(tokens, 'semantic', 'color/destructive', '#ef4444');
-    const color = resolveToken(tokens, 'semantic', 'color/on-destructive', '#ffffff');
-    return `<Frame name={Button_Destructive} w={${w}} h={48} flex={row} bg={${bg}} rounded={12} px={24} py={12} justify={center} items={center}>
-  <Text size={16} weight={semibold} color={${color}}>${label}</Text>
+    const { label = 'Delete', mode = 'Light', w = 'hug', tokens, typography } = opts;
+    const bg = resolveTokenValue(tokens, [['component', 'color/button/destructive/bg'], ['semantic', 'color/destructive']], mode === 'Dark' ? '#dc2626' : '#ef4444');
+    const color = resolveTokenValue(tokens, [['component', 'color/button/destructive/text'], ['semantic', 'color/on-destructive']], '#ffffff');
+    const radius = resolveTokenValue(tokens, [['component', 'radius/button'], ['radius', 'radius/full']], 12);
+    const px = resolveTokenValue(tokens, [['component', 'spacing/button/padding-inline'], ['spacing', 'spacing/lg']], 24);
+    const py = resolveTokenValue(tokens, [['component', 'spacing/button/padding-block'], ['spacing', 'spacing/sm']], 12);
+    const labelText = textProps({ typography, role: 'label/large', size: 16, weight: 'semibold', color });
+    return `<Frame name={Button_Destructive} w={${w}} h={48} flex={row} bg={${bg}} rounded={${radius}} px={${px}} py={${py}} justify={center} items={center}>
+  <Text ${labelText}>${label}</Text>
 </Frame>`;
   },
 
   icon(opts = {}) {
-    const { label = '', w = 44, iconSvg = '', mode = 'Light', tokens } = opts;
+    const { label = '', w = 44, iconSvg = '', mode = 'Light', tokens, typography } = opts;
     const bg = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/surface-inverse', '#1e293b') : resolveToken(tokens, 'semantic', 'color/surface-elevated', '#f1f5f9');
     const color = mode === 'Dark' ? resolveToken(tokens, 'semantic', 'color/on-surface-inverse', '#e2e8f0') : resolveToken(tokens, 'semantic', 'color/on-surface', '#1e293b');
+    const radius = resolveTokenValue(tokens, [['component', 'radius/button'], ['radius', 'radius/full']], 12);
     if (iconSvg) {
-      return `<Frame name={IconButton} w={${w}} h={44} flex={row} bg={${bg}} rounded={12} justify={center} items={center}>
+      return `<Frame name={IconButton} w={${w}} h={44} flex={row} bg={${bg}} rounded={${radius}} justify={center} items={center}>
   <SVG content={${iconSvg}} w={20} h={20} />
 </Frame>`;
     }
-    return `<Frame name={IconButton} w={${w}} h={44} flex={row} bg={${bg}} rounded={12} justify={center} items={center}>
-  <Text size={14} weight={semibold} color={${color}}>${label || '•'}</Text>
+    const iconLabel = textProps({ typography, role: 'label/large', size: 14, weight: 'semibold', color });
+    return `<Frame name={IconButton} w={${w}} h={44} flex={row} bg={${bg}} rounded={${radius}} justify={center} items={center}>
+  <Text ${iconLabel}>${label || '•'}</Text>
 </Frame>`;
   },
 };

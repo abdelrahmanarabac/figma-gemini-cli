@@ -15,7 +15,7 @@ import { dirname, join } from 'path';
 import { homedir } from 'os';
 import { CliRouter } from './cli/router.js';
 import { fastEval, fastRender } from './utils/figma.js';
-import { loadConfig, saveConfig } from './utils/config.js';
+import { loadConfig, saveConfig, saveProjectConfig, buildProjectConfig } from './utils/config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -26,7 +26,12 @@ const CONFIG_DIR = join(homedir(), '.figma-cli');
 try { mkdirSync(CONFIG_DIR, { recursive: true }); } catch { }
 
 const router = new CliRouter('figma-gemini-cli', pkg.version, pkg.description, {
-  config: { load: loadConfig, save: saveConfig },
+  config: {
+    load: loadConfig,
+    save: saveConfig,
+    saveProject: saveProjectConfig,
+    buildProject: buildProjectConfig,
+  },
   fastEval,
   fastRender
 });

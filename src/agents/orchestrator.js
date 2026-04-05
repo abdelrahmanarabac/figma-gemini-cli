@@ -148,7 +148,7 @@ export class Orchestrator {
 
     this._log('gate', `Selected ${selected.length} experts — Pre: ${phases.pre.map(s => s.expert.name).join(', ') || 'none'} | Build: ${phases.build.map(s => s.expert.name).join(', ') || 'none'} | Post: ${phases.post.map(s => s.expert.name).join(', ') || 'none'}`);
 
-    let pipelineData = { intent, commands: [], jsx: '' };
+    let pipelineData = { intent, commands: [], jsx: '', ...context };
     const results = {};
     let overallSuccess = true;
 

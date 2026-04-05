@@ -1,21 +1,6 @@
 import { Command } from '../../cli/command.js';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-import chalk from 'chalk';
 import inquirer from 'inquirer';
-
-const CONFIG_DIR = join(homedir(), '.figma-cli');
-const WORKFLOW_PATH = join(CONFIG_DIR, 'current_workflow.json');
-
-function loadWorkflow() {
-  if (!existsSync(WORKFLOW_PATH)) return null;
-  return JSON.parse(readFileSync(WORKFLOW_PATH, 'utf8'));
-}
-
-function saveWorkflow(data) {
-  writeFileSync(WORKFLOW_PATH, JSON.stringify(data, null, 2));
-}
+import { loadWorkflow, saveWorkflow } from '../../utils/design-workflow.js';
 
 class DesignTokensCommand extends Command {
   name = 'design tokens';
@@ -63,17 +48,33 @@ class DesignTokensCommand extends Command {
     workflow.timestamp = new Date().toISOString();
     saveWorkflow(workflow);
 
+    if (workflow.projectDir) {
+      const prefersDarkMode = answers.darkMode && /dark/i.test(workflow.discovery?.aesthetic || '');
+      const projectConfig = ctx.config.buildProject({
+        theme: {
+          mode: prefersDarkMode ? 'Dark' : 'Light',
+        },
+        design: {
+          palette: answers.palette,
+          roundness: answers.roundness,
+          darkMode: answers.darkMode,
+          navigation: workflow.architecture?.navigation || null,
+        },
+      });
+      ctx.config.saveProject(projectConfig, { cwd: workflow.projectDir });
+    }
+
     const payload = {
       success: true,
       stage: workflow.stage,
       tokens: answers,
       timestamp: workflow.timestamp,
-      nextStep: 'Run `design generate` to build the UI in Figma.',
+      nextStep: 'Run `design generate` to build the primary workflow screen in Figma.',
     };
 
     ctx.logSuccess('Design System Configured.', payload);
     if (!ctx.isJson) {
-      ctx.log('Workflow Ready: Run `design generate` to build the UI in Figma.');
+      ctx.log('Workflow Ready: Run `design generate` to build the primary workflow screen in Figma.');
     }
   }
 }

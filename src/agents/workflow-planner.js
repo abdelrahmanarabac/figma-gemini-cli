@@ -165,6 +165,11 @@ export class WorkflowPlannerExpert extends Expert {
   async inspectInventory(ctx) {
     try {
       const inventory = await ctx.eval(`
+        if (typeof figma.loadAllPagesAsync === 'function') {
+          try {
+            await figma.loadAllPagesAsync();
+          } catch (error) {}
+        }
         const collections = await figma.variables.getLocalVariableCollectionsAsync();
         const variables = await figma.variables.getLocalVariablesAsync();
         const textStyles = await figma.getLocalTextStylesAsync();

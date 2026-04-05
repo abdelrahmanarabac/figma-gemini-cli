@@ -6,7 +6,7 @@
  */
 
 // Map JSX component names → Figma node types
-const COMPONENT_MAP = {
+export const COMPONENT_MAP = {
     'Frame': 'FRAME',
     'AutoLayout': 'FRAME',   // Frame with layoutMode
     'Group': 'GROUP',
@@ -25,6 +25,10 @@ const COMPONENT_MAP = {
     'BarChart': 'SVG',
     'PieChart': 'SVG'
 };
+
+export function registerComponent(tagName, figmaType) {
+    COMPONENT_MAP[tagName] = figmaType;
+}
 
 // Map JSX prop names → Figma API property names
 const PROP_MAP = {
@@ -244,8 +248,28 @@ function generateDataVisualization(tagName, props) {
 
 
 /**
+ * Helper to compute line and column from an absolute index
+ */
+function getPosition(str, index) {
+    if (!str || index < 0) return { line: 1, column: 1 };
+    const prefix = str.slice(0, index);
+    const lines = prefix.split('\n');
+    return { line: lines.length, column: lines[lines.length - 1].length + 1 };
+}
+
+function pushError(errors, message, fullStr, index) {
+    const pos = getPosition(fullStr, index);
+    errors.push({
+        message,
+        line: pos.line,
+        column: pos.column,
+        index
+    });
+}
+
+/**
  * Enhanced Prop Parser
- * Handles: multiline, quotes, and nested braces.
+ * Handles: multiline, quotes, empty values, nested braces.
  */
 function parseProps(propsStr) {
     const props = {};
@@ -257,6 +281,7 @@ function parseProps(propsStr) {
 
         let keyStart = i;
         while (i < propsStr.length && /[a-zA-Z0-9_-]/.test(propsStr[i])) i++;
+        if (i === keyStart) { i++; continue; } // safety fallback
         const key = propsStr.slice(keyStart, i);
         
         while (i < propsStr.length && /\s/.test(propsStr[i])) i++;
@@ -299,7 +324,7 @@ function parseProps(propsStr) {
                 else if (value === 'false') value = false;
                 else if (!isNaN(Number(value)) && value.trim() !== '') value = Number(value);
             } else {
-                // Bare value
+                // Bare value - read until next whitespace or end of string
                 let valStart = i;
                 while (i < propsStr.length && !/\s/.test(propsStr[i])) i++;
                 value = propsStr.slice(valStart, i);
@@ -320,6 +345,7 @@ function findEndOfTag(str) {
     let inQuote = null;
     let braceDepth = 0;
     let i = 0;
+    const MAX_DEPTH = 50;
     while (i < str.length) {
         const char = str[i];
         
@@ -339,6 +365,7 @@ function findEndOfTag(str) {
         } else if (!inQuote) {
             if (char === '{') {
                 braceDepth++;
+                if (braceDepth > MAX_DEPTH) return -1; // Max depth guard
             } else if (char === '}') {
                 braceDepth--;
             } else if (char === '>' && braceDepth === 0) {
@@ -353,7 +380,7 @@ function findEndOfTag(str) {
 /**
  * Balanced Tag Content Extractor
  */
-function extractContent(str, tagName, errors = []) {
+function extractContent(str, tagName, errors = [], fullJsx = "", absoluteIndex = 0) {
     let depth = 1;
     let i = 0;
     const closeTag = `</${tagName}>`;
@@ -366,7 +393,7 @@ function extractContent(str, tagName, errors = []) {
             i += closeTag.length;
         } else if (str.slice(i).startsWith(openTagStart)) {
             const nextChar = str[i + openTagStart.length];
-            if (nextChar === ' ' || nextChar === '>' || nextChar === '/') {
+            if (nextChar === ' ' || nextChar === '>' || nextChar === '/' || nextChar === '\n' || nextChar === '\t') {
                 const endOfTag = findEndOfTag(str.slice(i));
                 if (endOfTag !== -1) {
                     const tagContent = str.slice(i, i + endOfTag + 1);
@@ -386,7 +413,7 @@ function extractContent(str, tagName, errors = []) {
     }
     
     if (depth > 0) {
-        errors.push(`Unclosed tag: <${tagName}>`);
+        pushError(errors, `Unclosed tag: <${tagName}>`, fullJsx, absoluteIndex);
     }
     return str;
 }
@@ -396,23 +423,47 @@ function extractContent(str, tagName, errors = []) {
  * parentId is yielded BEFORE children (parent-first order).
  * IDs are deterministic based on seed (timestamp) + counter.
  */
-export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp = 0, counter = { value: 0 }, errors = []) {
-    // 1. Clean JSX: Strip comments and normalise
-    let cleanJsx = jsx.replace(/{\/\*[\s\S]*?\*\/}/g, '');
+export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp = 0, counter = { value: 0 }, errors = [], fullJsxContext = null, globalOffset = 0) {
+    let isRootCall = false;
+    if (fullJsxContext === null) {
+        isRootCall = true;
+        // Strip BOM and normalize line endings
+        jsx = String(jsx || '').replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+        
+        // Reject oversized input
+        if (jsx.length > 500000) {
+            pushError(errors, "Input too large (max 500KB)", jsx, 0);
+            return;
+        }
+        fullJsxContext = jsx;
+    }
+
+    // 1. Clean JSX: Replace comments with spaces to preserve char offsets
+    let cleanJsx = jsx.replace(/{\/\*[\s\S]*?\*\/}/g, match => ' '.repeat(match.length));
     
     let lastIndex = 0;
+    let rootNodesCount = 0;
+
     while (lastIndex < cleanJsx.length) {
         const remaining = cleanJsx.slice(lastIndex);
         const openMatch = remaining.match(/<([A-Z][a-zA-Z0-9\.]*)/);
-        if (!openMatch) break;
+        if (!openMatch) {
+            // Check for trailing text outside root node if we are at root level
+            if (isRootCall && remaining.trim()) {
+                pushError(errors, `Trailing content found outside root element`, fullJsxContext, globalOffset + lastIndex);
+            }
+            break;
+        }
 
         const startIdxInRemaining = openMatch.index;
         const startIdx = lastIndex + startIdxInRemaining;
+        const absoluteStartIdx = globalOffset + startIdx;
         const tagName = openMatch[1];
         
         // Find end of this tag
         const endOfTagIdx = findEndOfTag(remaining.slice(startIdxInRemaining));
         if (endOfTagIdx === -1) {
+            pushError(errors, `Malformed or extremely deep tag starting here: <${tagName}`, fullJsxContext, absoluteStartIdx);
             lastIndex = startIdx + openMatch[0].length;
             continue;
         }
@@ -423,17 +474,21 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
 
         // Handle text nodes before this tag
         const textBefore = cleanJsx.slice(lastIndex, startIdx).trim();
-        if (textBefore && parentId) {
-            const textId = `${idPrefix}tmp_${timestamp}_${counter.value++}`;
-            yield {
-                command: 'node.create',
-                params: {
-                    id: textId,
-                    type: 'TEXT',
-                    parentId,
-                    props: { name: 'Text', characters: textBefore }
-                }
-            };
+        if (textBefore) {
+            if (parentId) {
+                const textId = `${idPrefix}tmp_${timestamp}_${counter.value++}`;
+                yield {
+                    command: 'node.create',
+                    params: {
+                        id: textId,
+                        type: 'TEXT',
+                        parentId,
+                        props: { name: 'Text', characters: textBefore }
+                    }
+                };
+            } else if (isRootCall) {
+                pushError(errors, `Text content outside root element: "${textBefore.substring(0, 10)}..."`, fullJsxContext, globalOffset + lastIndex);
+            }
         }
 
         const type = COMPONENT_MAP[tagName] || 'FRAME';
@@ -456,6 +511,7 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
         if (parentId) cmd.params.parentId = parentId;
         
         yield cmd;
+        if (isRootCall) rootNodesCount++;
 
         let endIdx = startIdx + fullTag.length;
         if (!isSelfClosing) {
@@ -471,7 +527,7 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
                     cmd.params.props.characters = content.trim();
                     endIdx += closeIdx + closeTag.length;
                 } else {
-                    errors.push(`Unclosed TEXT tag: <${tagName}>`);
+                    pushError(errors, `Unclosed TEXT tag: <${tagName}>`, fullJsxContext, absoluteStartIdx);
                     content = afterOpen;
                     cmd.params.props.characters = content.trim();
                     endIdx += content.length;
@@ -485,14 +541,14 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
                     cmd.params.props.content = content.trim();
                     endIdx += closeIdx + closeTag.length;
                 } else {
-                    errors.push(`Unclosed SVG tag: <${tagName}>`);
+                    pushError(errors, `Unclosed SVG tag: <${tagName}>`, fullJsxContext, absoluteStartIdx);
                     content = afterOpen;
                     cmd.params.props.content = content.trim();
                     endIdx += content.length;
                 }
             } else if (!isVirtualViz) {
-                content = extractContent(afterOpen, tagName, errors);
-                yield* generateCommands(content, id, idPrefix, timestamp, counter, errors);
+                content = extractContent(afterOpen, tagName, errors, fullJsxContext, globalOffset + endIdx);
+                yield* generateCommands(content, id, idPrefix, timestamp, counter, errors, fullJsxContext, globalOffset + endIdx);
                 
                 const expectedClose = `</${tagName}>`;
                 if (afterOpen.slice(content.length).startsWith(expectedClose)) {
@@ -521,7 +577,6 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
         };
     }
 }
-
 /**
  * Main entry points
  */
@@ -533,6 +588,12 @@ export function parseJSXStream(jsxString, idPrefix = "") {
 }
 
 function inferDiagnosticCode(message) {
+    if (message.startsWith('Unclosed TEXT tag:')) return 'UNCLOSED_TEXT_TAG';
+    if (message.startsWith('Unclosed SVG tag:')) return 'UNCLOSED_SVG_TAG';
+    if (message.startsWith('Unclosed tag:')) return 'UNCLOSED_TAG';
+    if (message.startsWith('Input too large')) return 'INPUT_TOO_LARGE';
+    if (message.startsWith('Trailing content') || message.startsWith('Text content outside root')) return 'TRAILING_CONTENT';
+    if (message.startsWith('Malformed or extremely deep tag')) return 'MALFORMED_TAG';
     if (message.startsWith('Unclosed TEXT tag:')) return 'UNCLOSED_TEXT_TAG';
     if (message.startsWith('Unclosed SVG tag:')) return 'UNCLOSED_SVG_TAG';
     if (message.startsWith('Unclosed tag:')) return 'UNCLOSED_TAG';
@@ -553,11 +614,20 @@ function hasAutoLayout(props = {}) {
 }
 
 function buildStructuralDiagnostics(errors, commands, jsxString) {
-    const diagnostics = errors.map(message => ({
-        code: inferDiagnosticCode(message),
-        severity: 'error',
-        message,
-    }));
+    const diagnostics = errors.map(err => {
+        const msg = typeof err === 'string' ? err : err.message;
+        const diag = {
+            code: inferDiagnosticCode(msg),
+            severity: 'error',
+            message: msg,
+        };
+        if (err.line !== undefined) {
+            diag.line = err.line;
+            diag.column = err.column;
+            diag.index = err.index;
+        }
+        return diag;
+    });
 
     if (typeof jsxString === 'string' && jsxString.trim() !== '' && commands.length === 0) {
         diagnostics.push({

@@ -7,7 +7,7 @@
  * Location: ~/.figma-cli/memory/
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { promises as fsPromises, readFileSync, existsSync, mkdirSync } from 'fs';
 import { join } from 'path';
 import { homedir } from 'os';
 
@@ -32,10 +32,12 @@ function loadStore(name) {
   return {};
 }
 
-function saveStore(name, data) {
+async function saveStore(name, data) {
   ensureDir();
   const filePath = join(MEMORY_DIR, `${name}.json`);
-  writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf8');
+  try {
+    await fsPromises.writeFile(filePath, JSON.stringify(data, null, 2), 'utf8');
+  } catch {}
 }
 
 export class DesignMemory {

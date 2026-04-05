@@ -268,13 +268,7 @@ node src/index.js run path/to/script.js
 node src/index.js hydrate {data.json} {Card_Component} --clone
 ```
 
----
 
-## 13. FigJam Status
-
-FigJam commands are currently hidden from the CLI until their backing client is implemented.
-
----
 
 ## 14. Utilities
 

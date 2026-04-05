@@ -1,21 +1,6 @@
 import { Command } from '../../cli/command.js';
-import { readFileSync, writeFileSync, existsSync } from 'fs';
-import { join } from 'path';
-import { homedir } from 'os';
-import chalk from 'chalk';
 import inquirer from 'inquirer';
-
-const CONFIG_DIR = join(homedir(), '.figma-cli');
-const WORKFLOW_PATH = join(CONFIG_DIR, 'current_workflow.json');
-
-function loadWorkflow() {
-  if (!existsSync(WORKFLOW_PATH)) return null;
-  return JSON.parse(readFileSync(WORKFLOW_PATH, 'utf8'));
-}
-
-function saveWorkflow(data) {
-  writeFileSync(WORKFLOW_PATH, JSON.stringify(data, null, 2));
-}
+import { loadWorkflow, saveWorkflow } from '../../utils/design-workflow.js';
 
 class DesignArchitectureCommand extends Command {
   name = 'design architecture';

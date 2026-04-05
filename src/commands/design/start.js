@@ -1,12 +1,9 @@
 import { Command } from '../../cli/command.js';
 import { mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { homedir } from 'os';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
-
-const CONFIG_DIR = join(homedir(), '.figma-cli');
-const WORKFLOW_PATH = join(CONFIG_DIR, 'current_workflow.json');
+import { saveWorkflow, WORKFLOW_PATH } from '../../utils/design-workflow.js';
 
 class DesignStartCommand extends Command {
   name = 'design start';
@@ -86,7 +83,6 @@ class DesignStartCommand extends Command {
     
     try {
       // 1. Create folders
-      mkdirSync(CONFIG_DIR, { recursive: true });
       mkdirSync(projectDir, { recursive: true });
       mkdirSync(join(projectDir, 'research'), { recursive: true });
       mkdirSync(join(projectDir, 'wireframes'), { recursive: true });
@@ -122,7 +118,7 @@ ${answers.features.map(f => `- ${f}`).join('\n')}
         projectDir,
         discovery: answers,
       };
-      writeFileSync(WORKFLOW_PATH, JSON.stringify(workflow, null, 2));
+      saveWorkflow(workflow);
 
       const payload = {
         success: true,

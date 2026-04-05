@@ -1,12 +1,12 @@
 const MATERIAL3_COLOR_REFERENCES = {
   primary: {
-    '10': '#21005d',
-    '20': '#381e72',
-    '30': '#4f378b',
-    '40': '#6750a4',
-    '80': '#d0bcff',
-    '90': '#eaddff',
-    '100': '#ffffff',
+    '10': '#4a1500',  // Very deep orange
+    '20': '#7a2800',  // Dark orange
+    '30': '#a93d00',  // Orange
+    '40': '#d05100',  // Rich orange
+    '80': '#ffb594',  // Light orange
+    '90': '#ffdbcb',  // Very light orange
+    '100': '#ffffff', // White
   },
   secondary: {
     '10': '#1d192b',

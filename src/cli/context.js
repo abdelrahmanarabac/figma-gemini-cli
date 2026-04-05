@@ -141,12 +141,50 @@ export class CommandContext {
     console.log(chalk.yellow(`${this._getSymbol('warning')} ${message}`));
   }
 
+  analyzeError(err) {
+    const msg = (err.message || err.toString()).toLowerCase();
+    
+    if (msg.includes('econrefused') || msg.includes('unreachable') || msg.includes('not connected')) {
+      return {
+        category: 'Connection',
+        suggestion: 'Run "node src/index.js connect" in a separate terminal to start the daemon, then open the Figma plugin.'
+      };
+    }
+    if (msg.includes('eaddrinuse')) {
+      return {
+        category: 'Port Conflict',
+        suggestion: 'Another instance of the daemon is already running. Check for existing processes or use a different port.'
+      };
+    }
+    if (msg.includes('unclosed tag') || msg.includes('parse error')) {
+      return {
+        category: 'Syntax',
+        suggestion: 'Check your JSX string for unclosed tags or invalid prop syntax. Ensure braces {} are balanced.'
+      };
+    }
+    if (msg.includes('timeout')) {
+      return {
+        category: 'Timeout',
+        suggestion: 'The Figma plugin took too long to respond. The document might be too large or the plugin might be paused.'
+      };
+    }
+
+    return { category: 'Internal', suggestion: 'Check the error message for details.' };
+  }
+
   logError(message, jsonPayload = null) {
     if (this.isJson) {
       this._printJson(jsonPayload || { status: 'error', error: message });
       return;
     }
     console.log(chalk.red(`${this._getSymbol('error')} ${message}`));
+
+    // Suggestion Engine
+    const analysis = this.analyzeError(new Error(message));
+    if (analysis && analysis.category) {
+      console.log(chalk.yellow(`   ↳ [${analysis.category}] ${analysis.suggestion}`));
+    }
+
     if (jsonPayload) {
       console.log(chalk.gray(JSON.stringify(jsonPayload, null, 2)));
     }
