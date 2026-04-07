@@ -1,7 +1,6 @@
 import { Command } from '../cli/command.js';
 import chalk from 'chalk';
 import ora from 'ora';
-import { buildMaterial3TypographyStyles } from '../data/design-systems/material3.js';
 
 class StyleListCommand extends Command {
   name = 'style list';

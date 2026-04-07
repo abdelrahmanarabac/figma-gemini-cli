@@ -10,27 +10,7 @@ class VarListCommand extends Command {
   async execute(ctx) {
     const spinner = ctx.isInteractive ? ora('Fetching variables...').start() : null;
     try {
-      const code = `
-        const collections = await figma.variables.getLocalVariableCollectionsAsync();
-        const variables = await figma.variables.getLocalVariablesAsync();
-        
-        return {
-          collections: collections.map(c => ({
-            id: c.id,
-            name: c.name,
-            modes: c.modes.map(m => ({ id: m.modeId, name: m.name })),
-            variableIds: c.variableIds // Include IDs to count correctly
-          })),
-          variables: variables.map(v => ({
-            id: v.id,
-            name: v.name,
-            type: v.resolvedType,
-            collectionId: v.variableCollectionId
-          }))
-        };
-      `;
-      
-      const result = await ctx.eval(code);
+      const result = await ctx.evalOp('variables.list');
       spinner?.stop();
       const collections = result?.collections || [];
       const variables = result?.variables || [];
@@ -88,50 +68,13 @@ class VarCreateCommand extends Command {
   async execute(ctx, options, name, type, value) {
     const spinner = ctx.startSpinner(`Creating variable "${name}"...`);
     try {
-      const code = `
-        const colRef = ${JSON.stringify(options.collection)};
-        const varName = ${JSON.stringify(name)};
-        const varType = ${JSON.stringify(type.toUpperCase())};
-        const rawValue = ${JSON.stringify(value)};
-        const isAlias = ${JSON.stringify(!!options.alias)};
-        
-        const variables = await figma.variables.getLocalVariablesAsync();
-        const collections = await figma.variables.getLocalVariableCollectionsAsync();
-        const col = collections.find(c => c.name === colRef || c.id === colRef);
-        if (!col) return { success: false, error: 'Collection not found.' };
-
-        async function parseValue(val, type, alias) {
-          if (alias) {
-            const cleanVal = val.startsWith('{') && val.endsWith('}') ? val.slice(1, -1) : val;
-            const target = variables.find(v => v.name === cleanVal || v.id === cleanVal);
-            if (!target) throw new Error('Alias target variable not found: ' + cleanVal);
-            return { type: 'VARIABLE_ALIAS', id: target.id };
-          }
-          if (type === 'COLOR') {
-             const hex = val.replace('#', '');
-             return {
-               r: parseInt(hex.substring(0, 2), 16) / 255,
-               g: parseInt(hex.substring(2, 4), 16) / 255,
-               b: parseInt(hex.substring(4, 6), 16) / 255,
-               a: 1
-             };
-          }
-          if (type === 'FLOAT') return parseFloat(val);
-          if (type === 'BOOLEAN') return val === 'true';
-          return val;
-        }
-
-        try {
-          const v = figma.variables.createVariable(varName, col, varType);
-          const parsed = await parseValue(rawValue, varType, isAlias);
-          v.setValueForMode(col.modes[0].modeId, parsed);
-          return { success: true, id: v.id };
-        } catch (e) {
-          return { success: false, error: e.message };
-        }
-      `;
-      
-      const result = await ctx.eval(code);
+      const result = await ctx.evalOp('variables.create', {
+        name,
+        type: type.toUpperCase(),
+        value,
+        collectionRef: options.collection,
+        isAlias: Boolean(options.alias),
+      });
       if (result.success) {
         const payload = {
           success: true,
@@ -182,16 +125,10 @@ class VarRenameCommand extends Command {
   async execute(ctx, options, idOrName, newName) {
     const spinner = ctx.startSpinner(`Renaming variable to "${newName}"...`);
     try {
-      const code = `
-        const ref = ${JSON.stringify(idOrName)};
-        const name = ${JSON.stringify(newName)};
-        const variables = await figma.variables.getLocalVariablesAsync();
-        const v = variables.find(v => v.id === ref || v.name === ref);
-        if (!v) return { success: false, error: 'Variable not found.' };
-        v.name = name;
-        return { success: true };
-      `;
-      const result = await ctx.eval(code);
+      const result = await ctx.evalOp('variables.rename', {
+        ref: idOrName,
+        newName,
+      });
       if (result.success) {
         const payload = {
           success: true,
@@ -232,15 +169,7 @@ class VarDeleteCommand extends Command {
   async execute(ctx, options, idOrName) {
     const spinner = ctx.startSpinner('Deleting variable...');
     try {
-      const code = `
-        const ref = ${JSON.stringify(idOrName)};
-        const variables = await figma.variables.getLocalVariablesAsync();
-        const v = variables.find(v => v.id === ref || v.name === ref);
-        if (!v) return { success: false, error: 'Variable not found.' };
-        v.remove();
-        return { success: true };
-      `;
-      const result = await ctx.eval(code);
+      const result = await ctx.evalOp('variables.delete', { ref: idOrName });
       if (result.success) {
         const payload = {
           success: true,
@@ -278,12 +207,7 @@ class ColCreateCommand extends Command {
   async execute(ctx, options, name) {
     const spinner = ctx.startSpinner(`Creating collection "${name}"...`);
     try {
-      const code = `
-        const n = ${JSON.stringify(name)};
-        const col = figma.variables.createVariableCollection(n);
-        return { success: true, id: col.id };
-      `;
-      const result = await ctx.eval(code);
+      const result = await ctx.evalOp('collection.create', { name });
       if (result.success) {
         const payload = {
           success: true,
@@ -315,16 +239,10 @@ class ColRenameCommand extends Command {
   async execute(ctx, options, idOrName, newName) {
     const spinner = ctx.startSpinner(`Renaming collection to "${newName}"...`);
     try {
-      const code = `
-        const ref = ${JSON.stringify(idOrName)};
-        const name = ${JSON.stringify(newName)};
-        const collections = await figma.variables.getLocalVariableCollectionsAsync();
-        const col = collections.find(c => c.id === ref || c.name === ref);
-        if (!col) return { success: false, error: 'Collection not found.' };
-        col.name = name;
-        return { success: true };
-      `;
-      const result = await ctx.eval(code);
+      const result = await ctx.evalOp('collection.rename', {
+        ref: idOrName,
+        newName,
+      });
       if (result.success) {
         const payload = {
           success: true,
@@ -365,15 +283,7 @@ class ColDeleteCommand extends Command {
   async execute(ctx, options, idOrName) {
     const spinner = ctx.startSpinner('Deleting collection...');
     try {
-      const code = `
-        const ref = ${JSON.stringify(idOrName)};
-        const collections = await figma.variables.getLocalVariableCollectionsAsync();
-        const col = collections.find(c => c.id === ref || c.name === ref);
-        if (!col) return { success: false, error: 'Collection not found.' };
-        col.remove();
-        return { success: true };
-      `;
-      const result = await ctx.eval(code);
+      const result = await ctx.evalOp('collection.delete', { ref: idOrName });
       if (result.success) {
         const payload = {
           success: true,

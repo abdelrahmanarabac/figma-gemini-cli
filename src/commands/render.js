@@ -1,6 +1,7 @@
 import { Command } from '../cli/command.js';
 import { readFileSync } from 'fs';
 import { ensurePluginConnection } from '../utils/connection.js';
+import { validateGuardian } from '../pipeline/validate.js';
 
 async function readStdin() {
   if (process.stdin.isTTY) return null;
@@ -13,11 +14,7 @@ async function readStdin() {
 
 function buildGuardianSummary(report) {
   if (!report) return null;
-  return {
-    pass: report.pass,
-    stats: report.stats,
-    violations: report.violations,
-  };
+  return { pass: report.pass, stats: report.stats, violations: report.violations };
 }
 
 class RenderCommand extends Command {
@@ -62,26 +59,22 @@ class RenderCommand extends Command {
       const { commands, ast, diagnostics, metadata } = compileResult;
       let guardianSummary = null;
 
-      // ── Guardian Pre-Validation ──
+      // Guardian validation (direct function call)
       try {
-        const { orchestrator } = await ctx.getAgents();
-        const guardian = orchestrator.experts.find(e => e.name === 'guardian');
-        if (guardian) {
-          const report = guardian.validate(commands);
-          guardianSummary = buildGuardianSummary(report);
-          if (report.violations.length > 0) {
-            if (!ctx.isJson) {
-              console.log(`\n  Guardian: ${report.stats.errors} errors, ${report.stats.warnings} warnings, ${report.stats.info} info`);
-              report.violations.forEach(v => {
-                const icon = v.severity === 'error' ? '[X]' : v.severity === 'warning' ? '[!]' : '[i]';
-                console.log(`    ${icon} [${v.ruleId}] ${v.nodeName}: ${v.message}`);
-              });
-              console.log('');
-            }
-          } else {
-            if (!ctx.isJson) {
-              console.log('  Guardian: All rules passed ✓\n');
-            }
+        const report = validateGuardian(commands);
+        guardianSummary = buildGuardianSummary(report);
+        if (report.violations.length > 0) {
+          if (!ctx.isJson) {
+            console.log(`\n  Guardian: ${report.stats.errors} errors, ${report.stats.warnings} warnings, ${report.stats.info} info`);
+            report.violations.forEach(v => {
+              const icon = v.severity === 'error' ? '[X]' : v.severity === 'warning' ? '[!]' : '[i]';
+              console.log(`    ${icon} [${v.ruleId}] ${v.nodeName}: ${v.message}`);
+            });
+            console.log('');
+          }
+        } else {
+          if (!ctx.isJson) {
+            console.log('  Guardian: All rules passed ✓\n');
           }
         }
       } catch { /* Guardian is optional, don't block dry-run */ }
@@ -89,24 +82,15 @@ class RenderCommand extends Command {
       const payload = {
         status: 'success',
         dryRun: true,
-        compiler: {
-          ok: compileResult.ok,
-          diagnostics,
-          metadata,
-          ast,
-        },
+        compiler: { ok: compileResult.ok, diagnostics, metadata, ast },
         commands,
         guardian: guardianSummary,
       };
 
-      const blockingDiagnostics = diagnostics.filter(diagnostic => diagnostic.severity === 'error');
+      const blockingDiagnostics = diagnostics.filter(d => d.severity === 'error');
       if (blockingDiagnostics.length > 0) {
         process.exitCode = 1;
-        ctx.logError('JSX compilation failed during dry-run.', {
-          ...payload,
-          status: 'error',
-          blockingDiagnostics,
-        });
+        ctx.logError('JSX compilation failed during dry-run.', { ...payload, status: 'error', blockingDiagnostics });
         return;
       }
 
@@ -120,33 +104,26 @@ class RenderCommand extends Command {
     }
 
     try {
-      // ── Guardian Middleware (pre-render validation) ──
+      // Guardian pre-render validation (direct function call)
       if (options.validate !== false) {
         try {
           const { compileJSX } = await import('../parser/jsx.js');
           const compileResult = compileJSX(inputJsx);
           const { commands, diagnostics, metadata, ast } = compileResult;
-          const blockingDiagnostics = diagnostics.filter(diagnostic => diagnostic.severity === 'error');
+          const blockingDiagnostics = diagnostics.filter(d => d.severity === 'error');
 
           if (blockingDiagnostics.length > 0) {
             process.exitCode = 1;
             ctx.logError('JSX compilation failed.', {
               status: 'error',
-              compiler: {
-                ok: compileResult.ok,
-                diagnostics,
-                metadata,
-                ast,
-              },
+              compiler: { ok: compileResult.ok, diagnostics, metadata, ast },
               blockingDiagnostics,
             });
             return;
           }
 
-          const { orchestrator } = await ctx.getAgents();
-          const guardian = orchestrator.experts.find(e => e.name === 'guardian');
-          if (guardian && commands.length > 0) {
-            const report = guardian.validate(commands);
+          if (commands.length > 0) {
+            const report = validateGuardian(commands);
             if (report.stats.errors > 0) {
               process.exitCode = 1;
               ctx.logError(`Guardian blocked render with ${report.stats.errors} error(s).`);
@@ -207,7 +184,7 @@ class RenderBatchCommand extends Command {
     }
 
     if (!rawInput) {
-      ctx.logError('Usage: render-batch \'["<Frame ...>", "<Frame ...>"]\' or -f <file>');
+      ctx.logError('Usage: render-batch \'["<Frame ...>", "<Frame ...>"]\'  or -f <file>');
       return;
     }
 
@@ -231,13 +208,10 @@ class RenderBatchCommand extends Command {
         const { commands } = parseJSX(jsx);
         allCommands.push(...commands);
       }
-      
+
       const { sendBatch } = await import('../transport/bridge.js');
       const results = await sendBatch(allCommands);
-      const payload = {
-        rendered: items.length,
-        results: results || null,
-      };
+      const payload = { rendered: items.length, results: results || null };
 
       if (ctx.isJson) {
         ctx.logSuccess(`Rendered ${items.length} frames`, payload);
@@ -255,17 +229,51 @@ class RenderBatchCommand extends Command {
 
 class EvalCommand extends Command {
   name = 'eval [code]';
-  description = 'Execute JavaScript in Figma';
+  description = 'Execute JavaScript in Figma (supports --op for safe operations)';
   needsConnection = true;
+  options = [
+    { flags: '--op <operation>', description: 'Use a safe eval operation instead of raw code' },
+    { flags: '--args <json>', description: 'JSON arguments for the operation' }
+  ];
 
   async execute(ctx, options, code) {
+    // Operation-based eval (safe, CSP-compliant)
+    if (options.op) {
+      let args = {};
+      if (options.args) {
+        try {
+          const cleanArgs = String(options.args).trim();
+          args = JSON.parse(cleanArgs);
+        } catch (e) {
+          // Attempt simple fix for PowerShell's quote-stripping: {key: val} -> {"key": "val"}
+          try {
+            const fixed = String(options.args)
+              .replace(/([{,])\s*([a-zA-Z0-9_]+)\s*:/g, '$1"$2":') // Quote keys
+              .replace(/:\s*([^"{\[\d][^,}]+)\s*([,}])/g, ':"$1"$2'); // Quote values if not number/object
+            args = JSON.parse(fixed);
+          } catch (inner) {
+            ctx.logError(`Invalid JSON for --args: ${e.message}`, { raw: options.args });
+            return;
+          }
+        }
+      }
+      try {
+        const result = await ctx.evalOp(options.op, args);
+        ctx.logSuccess(`Operation '${options.op}' executed`, result);
+      } catch (err) {
+        ctx.logError(`Operation failed: ${err.message}`);
+      }
+      return;
+    }
+
+    // Legacy code-based eval (falls back to pattern matching)
     let inputCode = code;
     if (!inputCode) {
       inputCode = await readStdin();
     }
 
     if (!inputCode) {
-      ctx.logError('Usage: eval "figma.root.name" or pipe into stdin');
+      ctx.logError('Usage: eval "code" or eval --op <operation> [--args <json>]');
       return;
     }
     try {
@@ -308,17 +316,6 @@ class GetCommand extends Command {
 
   async execute(ctx, options, id) {
     try {
-      // ── MoE Pipeline ──────────────────────────────
-      const { orchestrator } = await ctx.getAgents();
-      const pipelineResult = await orchestrator.execute(ctx, `get ${id || 'selected'}`);
-      
-      const analyzerResult = pipelineResult.results?.analyzer;
-      if (analyzerResult && analyzerResult.success) {
-        ctx.logSuccess('Node info (MoE):', analyzerResult.data.analysis);
-        return;
-      }
-
-      // ── Legacy Fallback ───────────────────────────
       const code = `
         let n;
         const id = ${JSON.stringify(id)};
@@ -327,14 +324,14 @@ class GetCommand extends Command {
         } else {
           n = figma.currentPage.selection[0];
         }
-        
+
         if (!n) return null;
-        return { 
-          id: n.id, 
-          name: n.name, 
-          type: n.type, 
-          x: n.x, y: n.y, 
-          width: n.width, height: n.height 
+        return {
+          id: n.id,
+          name: n.name,
+          type: n.type,
+          x: n.x, y: n.y,
+          width: n.width, height: n.height
         };
       `;
       const result = await ctx.eval(code);
@@ -356,37 +353,27 @@ class InspectCommand extends Command {
 
   async execute(ctx, options, id) {
     try {
-      // ── MoE Pipeline ──────────────────────────────
-      const { orchestrator } = await ctx.getAgents();
-      const pipelineResult = await orchestrator.execute(ctx, `inspect ${id || 'selected'}`);
-
-      // If MoE pipeline produced a result, use it. 
-      // Note: Current agents might need more logic to return full JSX.
-      // For now, we use MoE for intent, but keep the robust logic here.
-
       const { sendCommand } = await import('../transport/bridge.js');
       const result = await sendCommand('node.inspect', { id });
-      
+
       if (result && result.data) {
         function toJSX(node, indent = '') {
-          const typeMap = { 
-            FRAME: 'Frame', 
-            RECTANGLE: 'Rectangle', 
-            ELLIPSE: 'Ellipse', 
-            TEXT: 'Text', 
+          const typeMap = {
+            FRAME: 'Frame',
+            RECTANGLE: 'Rectangle',
+            ELLIPSE: 'Ellipse',
+            TEXT: 'Text',
             LINE: 'Line',
             SVG: 'SVG'
           };
           const tag = typeMap[node.type] || 'Frame';
-          
+
           let propEntries = Object.entries(node.props).filter(([k, v]) => v !== undefined && k !== 'text');
-          
-          // For SVG, we handle content specially
+
           if (node.type === 'SVG' && node.props.content) {
             propEntries = propEntries.filter(([k]) => k !== 'content');
           }
 
-          // Prioritize ID
           propEntries.sort(([ak], [bk]) => {
             if (ak === 'id') return -1;
             if (bk === 'id') return 1;
@@ -395,12 +382,11 @@ class InspectCommand extends Command {
 
           let props = propEntries
             .map(([k, v]) => {
-              // Wrap ALL values in curly braces as per GEMINI.md mandate
               if (typeof v === 'string') return `${k}={${JSON.stringify(v)}}`;
               return `${k}={${JSON.stringify(v)}}`;
             })
             .join(' ');
-          
+
           if (node.type === 'TEXT' && node.props.text) {
              const text = node.props.text;
              return `${indent}<${tag}${props ? ' ' + props : ''}>${text}</${tag}>`;
@@ -447,7 +433,6 @@ class UpdateCommand extends Command {
     let targetId = id;
     let inputJsx = jsx;
 
-    // Handle shift if only one arg provided
     if (id && !jsx && id.includes('<')) {
        inputJsx = id;
        targetId = 'selected';
@@ -464,44 +449,35 @@ class UpdateCommand extends Command {
     }
 
     try {
-      // ── MoE Pipeline ──────────────────────────────
-      const { orchestrator } = await ctx.getAgents();
-      const pipelineResult = await orchestrator.execute(ctx, `update ${targetId} with ${inputJsx}`);
-
       const { compileJSX } = await import('../parser/jsx.js');
       const compileResult = compileJSX(inputJsx);
-      const { commands, diagnostics, metadata, ast } = compileResult;
-      
+      const { commands, diagnostics } = compileResult;
+
       if (commands.length === 0) {
          ctx.logError('Invalid JSX.');
          return;
       }
 
-      const blockingDiagnostics = diagnostics.filter(diagnostic => diagnostic.severity === 'error');
+      const blockingDiagnostics = diagnostics.filter(d => d.severity === 'error');
       if (blockingDiagnostics.length > 0) {
         process.exitCode = 1;
         ctx.logError('JSX compilation failed.', {
           status: 'error',
-          compiler: {
-            ok: compileResult.ok,
-            diagnostics,
-            metadata,
-            ast,
-          },
+          compiler: { ok: compileResult.ok, diagnostics },
           blockingDiagnostics,
         });
         return;
       }
 
       const { sendCommand } = await import('../transport/bridge.js');
-      const result = await sendCommand('node.update', { 
-        id: targetId, 
+      const result = await sendCommand('node.update', {
+        id: targetId,
         props: commands[0].params.props,
-        batch: commands // Send the whole command list for recursive updates
+        batch: commands
       });
-      
+
       if (result && result.data && result.data.status === 'updated') {
-         ctx.logSuccess(`Node ${targetId} and children updated successfully (MoE validated)`);
+         ctx.logSuccess(`Node ${targetId} updated successfully`);
       } else {
          ctx.logError(`Update failed for node ${targetId}`);
       }
@@ -575,11 +551,11 @@ class NodeCommand extends Command {
 }
 
 export default [
-  new RenderCommand(), 
-  new RenderBatchCommand(), 
-  new EvalCommand(), 
-  new FindCommand(), 
-  new GetCommand(), 
+  new RenderCommand(),
+  new RenderBatchCommand(),
+  new EvalCommand(),
+  new FindCommand(),
+  new GetCommand(),
   new InspectCommand(),
   new UpdateCommand(),
   new NodeCommand()

@@ -99,19 +99,19 @@ async function upsertTextStyle(styleSpec, existingTextStyles) {
   style.fontName = await resolveTextStyleFont(styleSpec);
 
   if (styleSpec.fontSize !== undefined) {
-    style.fontSize = styleSpec.fontSize;
+    style.fontSize = Number(styleSpec.fontSize);
   }
 
   if (styleSpec.lineHeight !== undefined) {
     style.lineHeight = typeof styleSpec.lineHeight === 'object'
       ? styleSpec.lineHeight
-      : { value: styleSpec.lineHeight, unit: 'PIXELS' };
+      : { value: Number(styleSpec.lineHeight), unit: 'PIXELS' };
   }
 
   if (styleSpec.letterSpacing !== undefined) {
     style.letterSpacing = typeof styleSpec.letterSpacing === 'object'
       ? styleSpec.letterSpacing
-      : { value: styleSpec.letterSpacing, unit: 'PIXELS' };
+      : { value: Number(styleSpec.letterSpacing), unit: 'PIXELS' };
   }
 
   if (styleSpec.textCase !== undefined) {
@@ -175,6 +175,352 @@ async function applyResponsiveAdaptation(node, breakpoint) {
   }
 }
 
+// ── Eval Operation Dispatcher ────────────────────────
+// Replaces broken AsyncFunction-based eval with safe, pre-registered operations.
+// Figma's CSP blocks `new AsyncFunction()` on the plugin main thread.
+
+async function executeEvalOperation(op, args) {
+  switch (op) {
+    case 'variables.list': {
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const variables = await figma.variables.getLocalVariablesAsync();
+      return {
+        collections: collections.map(c => ({
+          id: c.id,
+          name: c.name,
+          modes: c.modes.map(m => ({ id: m.modeId, name: m.name })),
+          variableIds: c.variableIds,
+        })),
+        variables: variables.map(v => ({
+          id: v.id,
+          name: v.name,
+          type: v.resolvedType,
+          collectionId: v.variableCollectionId,
+        })),
+      };
+    }
+
+    case 'variables.create': {
+      const { name, type, value, collectionRef, isAlias } = args;
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const variables = await figma.variables.getLocalVariablesAsync();
+      const col = collections.find(c => c.name === collectionRef || c.id === collectionRef);
+      if (!col) return { success: false, error: 'Collection not found.' };
+
+      async function parseValue(val, varType, alias) {
+        if (alias) {
+          const cleanVal = val.startsWith('{') && val.endsWith('}') ? val.slice(1, -1) : val;
+          const target = variables.find(v => v.name === cleanVal || v.id === cleanVal);
+          if (!target) throw new Error('Alias target not found: ' + cleanVal);
+          return { type: 'VARIABLE_ALIAS', id: target.id };
+        }
+        if (varType === 'COLOR') {
+          const hex = val.replace('#', '');
+          return {
+            r: parseInt(hex.substring(0, 2), 16) / 255,
+            g: parseInt(hex.substring(2, 4), 16) / 255,
+            b: parseInt(hex.substring(4, 6), 16) / 255,
+            a: 1,
+          };
+        }
+        if (varType === 'FLOAT') return parseFloat(val);
+        if (varType === 'BOOLEAN') return val === 'true';
+        return val;
+      }
+
+      const v = figma.variables.createVariable(name, col, type);
+      const parsed = await parseValue(value, type, isAlias);
+      v.setValueForMode(col.modes[0].modeId, parsed);
+      return { success: true, id: v.id };
+    }
+
+    case 'variables.rename': {
+      const { ref, newName } = args;
+      const variables = await figma.variables.getLocalVariablesAsync();
+      const v = variables.find(v => v.id === ref || v.name === ref);
+      if (!v) return { success: false, error: 'Variable not found.' };
+      v.name = newName;
+      return { success: true };
+    }
+
+    case 'variables.delete': {
+      const { ref } = args;
+      const variables = await figma.variables.getLocalVariablesAsync();
+      const v = variables.find(v => v.id === ref || v.name === ref);
+      if (!v) return { success: false, error: 'Variable not found.' };
+      v.remove();
+      return { success: true };
+    }
+
+    case 'collection.create': {
+      const { name } = args;
+      const col = figma.variables.createVariableCollection(name);
+      return { success: true, id: col.id };
+    }
+
+    case 'collection.rename': {
+      const { ref, newName } = args;
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const col = collections.find(c => c.id === ref || c.name === ref);
+      if (!col) return { success: false, error: 'Collection not found.' };
+      col.name = newName;
+      return { success: true };
+    }
+
+    case 'collection.delete': {
+      const { ref } = args;
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const col = collections.find(c => c.id === ref || c.name === ref);
+      if (!col) return { success: false, error: 'Collection not found.' };
+      col.remove();
+      return { success: true };
+    }
+
+    case 'canvas.info': {
+      const selection = figma.currentPage.selection;
+      if (selection.length === 0) {
+        return {
+          selection: [],
+          message: 'No nodes selected',
+          page: { id: figma.currentPage.id, name: figma.currentPage.name },
+        };
+      }
+      return {
+        selection: selection.map(n => ({
+          id: n.id,
+          name: n.name,
+          type: n.type,
+          width: Math.round(n.width),
+          height: Math.round(n.height),
+          x: Math.round(n.x),
+          y: Math.round(n.y),
+        })),
+        page: { id: figma.currentPage.id, name: figma.currentPage.name },
+      };
+    }
+
+    case 'node.inspect': {
+      let node;
+      if (args.id) {
+        node = await figma.getNodeByIdAsync(args.id);
+      } else {
+        node = figma.currentPage.selection[0];
+      }
+      if (!node) throw new Error('Node not found or nothing selected');
+      return serializeNode(node);
+    }
+
+    case 'node.find': {
+      const { query } = args;
+      const nodes = figma.currentPage.findAll(n => n.name.includes(query));
+      return nodes.map(n => ({ id: n.id, name: n.name, type: n.type }));
+    }
+
+    case 'node.find.byId': {
+      const { id } = args;
+      const node = await figma.getNodeByIdAsync(id);
+      if (!node) return { error: 'Node not found' };
+      return { id: node.id, name: node.name, type: node.type };
+    }
+
+    case 'node.selection': {
+      const sel = figma.currentPage.selection;
+      return sel.map(n => ({ id: n.id, name: n.name, type: n.type }));
+    }
+
+    case 'node.setSelection': {
+      const { id } = args;
+      const node = await figma.getNodeByIdAsync(id);
+      if (!node) return { error: 'Node not found' };
+      figma.currentPage.selection = [node];
+      return { success: true, id: node.id };
+    }
+
+    case 'style.list': {
+      const textStyles = await figma.getLocalTextStylesAsync();
+      const paintStyles = await figma.getLocalPaintStylesAsync();
+      const effectStyles = await figma.getLocalEffectStylesAsync();
+      const gridStyles = await figma.getLocalGridStylesAsync();
+      return {
+        text: textStyles.map(s => ({ id: s.id, name: s.name, type: 'TEXT' })),
+        paint: paintStyles.map(s => ({ id: s.id, name: s.name, type: 'PAINT' })),
+        effect: effectStyles.map(s => ({ id: s.id, name: s.name, type: 'EFFECT' })),
+        grid: gridStyles.map(s => ({ id: s.id, name: s.name, type: 'GRID' })),
+      };
+    }
+
+    case 'style.create_text': {
+      const { name, fontSize, fontWeight = 400, lineHeight, letterSpacing = 0, fontFamily = 'Inter' } = args;
+      const existingTextStyles = await figma.getLocalTextStylesAsync();
+      const styleSpec = { name, fontSize, fontWeight, lineHeight, letterSpacing, fontFamily };
+      const result = await upsertTextStyle(styleSpec, existingTextStyles);
+      return { success: true, id: result.style.id, name: result.style.name, created: result.created };
+    }
+
+    case 'style.create_text_styles': {
+      const styles = Array.isArray(args.styles) ? args.styles : [];
+      const existingTextStyles = await figma.getLocalTextStylesAsync();
+      const results = [];
+      for (const styleSpec of styles) {
+        const result = await upsertTextStyle(styleSpec, existingTextStyles);
+        results.push({ success: true, id: result.style.id, name: result.style.name, created: result.created });
+      }
+      return { success: true, results, total: styles.length };
+    }
+
+    case 'style.delete_all': {
+      const textStyles = await figma.getLocalTextStylesAsync();
+      const paintStyles = await figma.getLocalPaintStylesAsync();
+      const effectStyles = await figma.getLocalEffectStylesAsync();
+      const gridStyles = await figma.getLocalGridStylesAsync();
+
+      const all = [...textStyles, ...paintStyles, ...effectStyles, ...gridStyles];
+      const count = all.length;
+      for (const s of all) {
+        try { s.remove(); } catch(e) {}
+      }
+      return { deleted: count };
+    }
+
+    case 'style.create_text': {
+      const { name, fontSize, fontWeight = 400, lineHeight, letterSpacing = 0, fontFamily = 'Inter' } = args;
+      const existingTextStyles = await figma.getLocalTextStylesAsync();
+      const styleSpec = { name, fontSize, fontWeight, lineHeight, letterSpacing, fontFamily };
+      const result = await upsertTextStyle(styleSpec, existingTextStyles);
+      return { success: true, id: result.style.id, name: result.style.name, created: result.created };
+    }
+
+    case 'style.create_text_styles': {
+      const styles = Array.isArray(args.styles) ? args.styles : [];
+      const existingTextStyles = await figma.getLocalTextStylesAsync();
+      const results = [];
+      for (const styleSpec of styles) {
+        const result = await upsertTextStyle(styleSpec, existingTextStyles);
+        results.push({ success: true, id: result.style.id, name: result.style.name, created: result.created });
+      }
+      return { success: true, results, total: styles.length };
+    }
+
+    case 'mode.add': {
+      const { collectionRef, modeName } = args;
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const col = collections.find(c => c.id === collectionRef || c.name === collectionRef);
+      if (!col) return { success: false, error: 'Collection not found.' };
+      const modeId = col.addMode(modeName);
+      return { success: true, modeId };
+    }
+
+    case 'mode.rename': {
+      const { collectionRef, oldMode, newModeName } = args;
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const col = collections.find(c => c.id === collectionRef || c.name === collectionRef);
+      if (!col) return { success: false, error: 'Collection not found.' };
+      const mode = col.modes.find(m => m.name === oldMode || m.modeId === oldMode);
+      if (!mode) return { success: false, error: 'Mode not found.' };
+      col.renameMode(mode.modeId, newModeName);
+      return { success: true, modeId: mode.modeId };
+    }
+
+    case 'mode.delete': {
+      const { collectionRef, modeRef } = args;
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const col = collections.find(c => c.id === collectionRef || c.name === collectionRef);
+      if (!col) return { success: false, error: 'Collection not found.' };
+      const mode = col.modes.find(m => m.name === modeRef || m.modeId === modeRef);
+      if (!mode) return { success: false, error: 'Mode not found.' };
+      if (col.modes.length <= 1) return { success: false, error: 'Cannot delete the last mode.' };
+      col.deleteMode(mode.modeId);
+      return { success: true };
+    }
+
+    case 'page.list': {
+      const pages = figma.root.children;
+      return {
+        pages: pages.map(p => ({ id: p.id, name: p.name })),
+        currentPage: { id: figma.currentPage.id, name: figma.currentPage.name },
+      };
+    }
+
+    case 'inventory.scan': {
+      if (typeof figma.loadAllPagesAsync === 'function') {
+        try { await figma.loadAllPagesAsync(); } catch (error) {}
+      }
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const variables = await figma.variables.getLocalVariablesAsync();
+      const textStyles = await figma.getLocalTextStylesAsync();
+      const components = figma.root.findAll(node => node.type === 'COMPONENT' || node.type === 'COMPONENT_SET');
+      return {
+        pageName: figma.currentPage.name,
+        selection: figma.currentPage.selection.map(node => ({ id: node.id, name: node.name, type: node.type })),
+        variableCollections: collections.map(collection => ({
+          id: collection.id,
+          name: collection.name,
+          modes: collection.modes.map(mode => mode.name),
+        })),
+        variables: variables.map(variable => {
+          const collection = collections.find(item => item.id === variable.variableCollectionId);
+          return {
+            id: variable.id,
+            name: variable.name,
+            type: variable.resolvedType,
+            collectionName: collection ? collection.name : '',
+          };
+        }),
+        textStyles: textStyles.map(style => ({ id: style.id, name: style.name })),
+        components: components.slice(0, 300).map(component => ({
+          id: component.id,
+          name: component.name,
+          type: component.type,
+        })),
+      };
+    }
+
+    default:
+      return { error: `Unknown operation: ${op}` };
+  }
+}
+
+// Legacy code compatibility layer — maps known code patterns to operations.
+// This handles commands that still pass raw code strings via ctx.eval().
+async function executeLegacyCode(code) {
+  // Pattern 1: Variable listing
+  if (code.includes('getLocalVariableCollectionsAsync') && code.includes('getLocalVariablesAsync')) {
+    return await executeEvalOperation('variables.list', {});
+  }
+
+  // Pattern 2: Canvas info
+  if (code.includes('currentPage.selection') && code.includes('currentPage.name')) {
+    return await executeEvalOperation('canvas.info', {});
+  }
+
+  // Pattern 3: Node inspect
+  if (code.includes('getNodeByIdAsync') && code.includes('selection')) {
+    return await executeEvalOperation('node.inspect', { id: null });
+  }
+
+  // Pattern 4: Style list
+  if (code.includes('getLocalTextStylesAsync') && code.includes('getLocalPaintStylesAsync')) {
+    return await executeEvalOperation('style.list', {});
+  }
+
+  // Pattern 5: Find nodes
+  if (code.includes('findAll') && code.includes('includes')) {
+    const match = code.match(/\.includes\(["']([^"']+)["']\)/);
+    if (match) {
+      return await executeEvalOperation('node.find', { query: match[1] });
+    }
+  }
+
+  // Pattern 6: Page info
+  if (code.includes('currentPage.name') && !code.includes('selection')) {
+    return {
+      page: { id: figma.currentPage.id, name: figma.currentPage.name },
+    };
+  }
+
+  return { error: 'Legacy code pattern not recognized. Use operation-based eval with { op, args }.' };
+}
+
 // ── Command Handlers ─────────────────────────────────
 
 const handlers = {
@@ -208,6 +554,20 @@ const handlers = {
       effect: effectStyles.map(s => ({ id: s.id, name: s.name, type: 'EFFECT' })),
       grid: gridStyles.map(s => ({ id: s.id, name: s.name, type: 'GRID' }))
     };
+  },
+
+  'style.delete_all': async () => {
+    const textStyles = await figma.getLocalTextStylesAsync();
+    const paintStyles = await figma.getLocalPaintStylesAsync();
+    const effectStyles = await figma.getLocalEffectStylesAsync();
+    const gridStyles = await figma.getLocalGridStylesAsync();
+
+    const all = [...textStyles, ...paintStyles, ...effectStyles, ...gridStyles];
+    const count = all.length;
+    for (const s of all) {
+      try { s.remove(); } catch(e) {}
+    }
+    return { deleted: count };
   },
 
   'style.create_text': async (params) => {
@@ -551,10 +911,21 @@ const handlers = {
 
   'eval': async (params) => {
     try {
-      // Create an async function wrapper that provides 'figma' and other globals
-      const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
-      const fn = new AsyncFunction('figma', params.code);
-      return await fn(figma);
+      // Figma plugin main thread does NOT support AsyncFunction constructor (CSP restriction).
+      // Instead, we use a safe dispatcher that maps 'op' to known Figma API operations.
+      const { op, code, args = {} } = params;
+
+      if (op) {
+        // Operation-based dispatch — safe, no dynamic eval needed
+        return await executeEvalOperation(op, args);
+      }
+
+      // Legacy fallback: if code is provided without op, try to execute known patterns
+      if (code) {
+        return await executeLegacyCode(code);
+      }
+
+      return { error: 'No operation or code provided' };
     } catch (err) {
       throw new Error(`Eval failed: ${err.message}`);
     }

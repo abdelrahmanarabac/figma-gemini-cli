@@ -21,7 +21,7 @@ class DesignTokensCommand extends Command {
         type: 'list',
         name: 'palette',
         message: 'Select a base color palette:',
-        choices: ['Tailwind Default', 'Shadcn/UI', 'Radix UI', 'Custom Hex Codes']
+        choices: ['AI-Generated Dynamic Palette', 'Custom Hex Codes']
       },
       {
         type: 'list',
@@ -69,12 +69,12 @@ class DesignTokensCommand extends Command {
       stage: workflow.stage,
       tokens: answers,
       timestamp: workflow.timestamp,
-      nextStep: 'Run `design generate` to build the primary workflow screen in Figma.',
+      nextStep: 'Use `render --code` to build your UI in Figma.',
     };
 
     ctx.logSuccess('Design System Configured.', payload);
     if (!ctx.isJson) {
-      ctx.log('Workflow Ready: Run `design generate` to build the primary workflow screen in Figma.');
+      ctx.log('Workflow Ready: Use `render --code` to build your UI in Figma.');
     }
   }
 }

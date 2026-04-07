@@ -41,7 +41,7 @@ class InitCommand extends Command {
     ctx.log('To get started:');
     ctx.log(`  1. Open Figma and launch the ${chalk.cyan('FigCli')} plugin.`);
     ctx.log(`  2. Run ${chalk.green('node src/index.js connect')} in a separate terminal to start the daemon.`);
-    ctx.log(`  3. Try generating UI: ${chalk.green('node src/index.js generate "A login card with email and password"')}`);
+    ctx.log(`  3. Try rendering UI: ${chalk.green('node src/index.js render --code "<Frame w={320} h={180} bg={color/surface} flex={col} p={spacing/lg} rounded={radius/lg}><Text>Hello</Text></Frame>"')}`);
   }
 }
 

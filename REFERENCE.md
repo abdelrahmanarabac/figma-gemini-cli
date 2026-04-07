@@ -1,6 +1,6 @@
-# Command Reference — figma-gemini-cli (MoE Design Agent)
+# Command Reference — figma-gemini-cli
 
-> Every command funnels through the **Mix-of-Experts pipeline**. Experts are scored, dispatched, and their outputs chained before anything hits the Figma canvas.
+> The CLI uses a **lean pipeline**: `prepare` (inventory scan) → `build` (JSX compile) → `validate` (Guardian + A11y) → `render` (push to Figma). The AI agent generates all JSX.
 
 ---
 
@@ -17,57 +17,6 @@ node src/index.js connect        # auto CDP routing
 node src/index.js connect --safe # manual plugin mode
 node src/index.js status         # check connection
 ```
-
----
-
-## 2. MoE Generation Pipeline
-
-### `generate <description>` — MoE UI Synthesis
-Routes through **all 8 experts**: Orchestrator parses intent → TokenExpert ensures tokens → Builder selects template → UXWriter provides copy → Visual matches icons → Guardian validates → A11y checks contrast → Responsive analyzes breakpoints.
-
-| Flag | Effect |
-|---|---|
-| `--verbose` / `-v` | Print full pipeline trace (expert scores, decisions, timing) |
-| `--dry-run` | Execute pipeline without requiring a live Figma render |
-| `--mode <mode>` | Theme mode: `Light` or `Dark` (default: Light) |
-
-```powershell
-# Full AI synthesis with expert pipeline
-node src/index.js generate "A modern login card with email and password fields"
-
-# Verbose — see which experts fired and why
-node src/index.js generate "A stat card showing `$12,500 revenue with +12% growth" --verbose
-
-# Dry-run — inspect pipeline output without rendering
-node src/index.js generate "A pricing page with 3 tiers" --dry-run
-```
-
-When Guardian reports errors, generation stops before render and exits non-zero.
-
-**Pipeline trace output:**
-```
-🧠 [intent] Action: generate, Tags: [component]
-🔀 [gate] Selected 8 experts: guardian(1.00), builder(0.95), a11y(0.75),
-          token-expert(0.60), ux-writer(0.50), analyzer(0.40),
-          visual(0.40), responsive(0.40)
-⚡ → builder (0.95) → matched card/stat template
-⚡ → a11y (0.75) → WCAG check: 7.2:1 ✓
-⚡ → token-expert (0.60) → 2 raw colors → token recommendations
-✅ Pipeline finished in 9ms
-```
-
-### Builder Templates (Auto-Matched from Description)
-| Template | Triggered by |
-|---|---|
-| `button/primary` | "button", "CTA", "submit" |
-| `button/secondary` | "secondary button" |
-| `button/ghost` | "ghost button", "text button" |
-| `button/destructive` | "delete button", "destructive" |
-| `input/text` | "input", "field", "text field" |
-| `card/basic` | "card" |
-| `card/stat` | "stat card", "metric", "KPI" |
-| `badge/status` | "badge", "tag", "label" |
-| `nav/sidebar` | "sidebar", "navigation" |
 
 ---
 
@@ -122,21 +71,12 @@ node src/index.js render-batch "[
 
 ---
 
-## 4. Token & Variable Management (TokenExpert Domain)
+## 4. Token & Variable Management
 
-### Presets
+### Token Commands
 ```powershell
-node src/index.js tokens tailwind   # 242-color Tailwind palette
-node src/index.js tokens shadcn     # shadcn/ui tokens (Light + Dark modes)
-node src/index.js tokens spacing    # 4px-base geometric spacing scale
-node src/index.js tokens radii      # border-radius constraints
 node src/index.js tokens clear      # wipe all variables + collections
-```
-
-### W3C DTCG Import
-```powershell
-node src/index.js tokens w3c import "path/to/tokens.json"
-node src/index.js tokens import "colors.json" --collection {Colors}
+node src/index.js tokens import <file> --collection {Name}  # import from JSON
 ```
 
 ### Collections
@@ -177,7 +117,7 @@ node src/index.js style update {Inter} [pattern]
 
 ---
 
-## 5. Canvas Query & Mutation (Analyzer Domain)
+## 5. Canvas Query & Mutation
 
 ### Inspection
 ```powershell
@@ -196,7 +136,7 @@ node src/index.js node delete {1:234}                    # delete node
 
 ---
 
-## 6. Responsive & Skeleton (Responsive Expert Domain)
+## 6. Responsive & Skeleton
 
 ```powershell
 # Clone at multiple breakpoints (375, 768, 1440)
@@ -216,7 +156,7 @@ node src/index.js proto link {Button} {Target_Frame} --trigger {ON_CLICK} --tran
 
 ---
 
-## 8. Auditing (A11y Expert Domain)
+## 8. Auditing
 
 ```powershell
 # Accessibility audit for the current page
@@ -268,29 +208,24 @@ node src/index.js run path/to/script.js
 node src/index.js hydrate {data.json} {Card_Component} --clone
 ```
 
+---
 
+## 13. Pipeline Modules
+
+| File | Role |
+|---|---|
+| `src/pipeline/prepare.js` | Inventory scanner (tokens, components, styles) |
+| `src/pipeline/build.js` | JSX → Figma command compiler |
+| `src/pipeline/validate.js` | Guardian rules + A11y checks |
+| `src/pipeline/index.js` | Pipeline orchestrator (`run()`) |
+| `src/data/tokens.js` | Token utility functions (no hardcoded values) |
+| `src/data/copy-patterns.js` | Copy pattern stubs (AI-driven) |
+| `src/data/icons.js` | Icon stubs (AI-driven) |
+
+---
 
 ## 14. Utilities
 
 ```powershell
 node src/index.js send-feedback "Great tool!"
 ```
-
----
-
-## Appendix: MoE Agent Files
-
-| File | Expert | Gate | Priority |
-|---|---|---|---|
-| `src/agents/expert.js` | Base class | — | — |
-| `src/agents/orchestrator.js` | 🧠 Orchestrator | Router | — |
-| `src/agents/guardian.js` | 🛡️ Guardian | 1.00 | 90 |
-| `src/agents/builder.js` | 🏗️ Builder | 0.95 | 30 |
-| `src/agents/a11y-expert.js` | ♿ A11y | 0.75 | 85 |
-| `src/agents/token-expert.js` | 🎨 TokenExpert | 0.60 | 10 |
-| `src/agents/ux-writer.js` | ✏️ UXWriter | 0.50 | 25 |
-| `src/agents/analyzer.js` | 🔍 Analyzer | 0.40 | 5 |
-| `src/agents/visual-expert.js` | 🖼️ Visual | 0.40 | 20 |
-| `src/agents/responsive-expert.js` | 📱 Responsive | 0.40 | 70 |
-| `src/agents/index.js` | Loader | — | — |
-| `src/memory/design-memory.js` | 🗄️ Memory | — | — |

@@ -7,45 +7,24 @@ export class CommandContext {
    * @param {Object} deps - Injected dependencies
    */
   constructor(options = {}, deps = {}) {
-    // JSON is opt-in. Non-interactive shells still suppress spinners,
-    // but should keep human-readable output unless --json is requested.
     this.isJson = Boolean(options.json);
     this.isInteractive = Boolean(process.stdout.isTTY);
-
-    // Injected dependencies from the router to decouple Context from implementations
     this._deps = deps;
     this._figmaClient = null;
-    this._agentSystem = null;
+    this._pipeline = null;
   }
 
-  // ── MoE Agent System ────────────────────────────────
+  // ── Pipeline ─────────────────────────────────────────
 
   /**
-   * Lazy-loaded agent system: orchestrator, experts, and memory.
-   * @returns {{ orchestrator: import('../agents/orchestrator.js').Orchestrator, memory: import('../memory/design-memory.js').DesignMemory, experts: Object }}
+   * Returns the pipeline module (prepare, build, validate, run).
+   * @returns {Promise<Object>}
    */
-  get agents() {
-    if (!this._agentSystem) {
-      // Lazy-init: loads synchronously on first access, then cached
-      this._agentSystem = this._initAgents();
+  async getPipeline() {
+    if (!this._pipeline) {
+      this._pipeline = await import('../pipeline/index.js');
     }
-    return this._agentSystem;
-  }
-
-  async _initAgents() {
-    if (this._agentSystemResolved) return this._agentSystemResolved;
-    const { createAgentSystem } = await import('../agents/index.js');
-    this._agentSystemResolved = createAgentSystem();
-    return this._agentSystemResolved;
-  }
-
-  /**
-   * Async getter for agent system.
-   * @returns {Promise<{ orchestrator: any, memory: any, experts: Object }>}
-   */
-  async getAgents() {
-    if (this._agentSystemResolved) return this._agentSystemResolved;
-    return await this._initAgents();
+    return this._pipeline;
   }
 
   // ── Output ───────────────────────────────────────────
@@ -87,28 +66,18 @@ export class CommandContext {
     const ctx = this;
     return {
       text,
-      start() {
-        return this;
-      },
-      stop() {
-        return this;
-      },
+      start() { return this; },
+      stop() { return this; },
       succeed(message, jsonPayload = null) {
-        if (message) {
-          ctx.logSuccess(message, jsonPayload);
-        }
+        if (message) ctx.logSuccess(message, jsonPayload);
         return this;
       },
       fail(message, jsonPayload = null) {
-        if (message) {
-          ctx.logError(message, jsonPayload);
-        }
+        if (message) ctx.logError(message, jsonPayload);
         return this;
       },
       warn(message, jsonPayload = null) {
-        if (message) {
-          ctx.logWarning(message, jsonPayload);
-        }
+        if (message) ctx.logWarning(message, jsonPayload);
         return this;
       },
     };
@@ -143,30 +112,18 @@ export class CommandContext {
 
   analyzeError(err) {
     const msg = (err.message || err.toString()).toLowerCase();
-    
+
     if (msg.includes('econrefused') || msg.includes('unreachable') || msg.includes('not connected')) {
-      return {
-        category: 'Connection',
-        suggestion: 'Run "node src/index.js connect" in a separate terminal to start the daemon, then open the Figma plugin.'
-      };
+      return { category: 'Connection', suggestion: 'Run "node src/index.js connect" in a separate terminal to start the daemon, then open the Figma plugin.' };
     }
     if (msg.includes('eaddrinuse')) {
-      return {
-        category: 'Port Conflict',
-        suggestion: 'Another instance of the daemon is already running. Check for existing processes or use a different port.'
-      };
+      return { category: 'Port Conflict', suggestion: 'Another instance of the daemon is already running. Check for existing processes or use a different port.' };
     }
     if (msg.includes('unclosed tag') || msg.includes('parse error')) {
-      return {
-        category: 'Syntax',
-        suggestion: 'Check your JSX string for unclosed tags or invalid prop syntax. Ensure braces {} are balanced.'
-      };
+      return { category: 'Syntax', suggestion: 'Check your JSX string for unclosed tags or invalid prop syntax. Ensure braces {} are balanced.' };
     }
     if (msg.includes('timeout')) {
-      return {
-        category: 'Timeout',
-        suggestion: 'The Figma plugin took too long to respond. The document might be too large or the plugin might be paused.'
-      };
+      return { category: 'Timeout', suggestion: 'The Figma plugin took too long to respond. The document might be too large or the plugin might be paused.' };
     }
 
     return { category: 'Internal', suggestion: 'Check the error message for details.' };
@@ -179,7 +136,6 @@ export class CommandContext {
     }
     console.log(chalk.red(`${this._getSymbol('error')} ${message}`));
 
-    // Suggestion Engine
     const analysis = this.analyzeError(new Error(message));
     if (analysis && analysis.category) {
       console.log(chalk.yellow(`   ↳ [${analysis.category}] ${analysis.suggestion}`));
@@ -192,28 +148,37 @@ export class CommandContext {
 
   // ── Figma Execution ──────────────────────────────────
 
-  /**
-   * Execute Figma Plugin API code via structured command protocol.
-   * @param {string} code - JavaScript code to evaluate in Figma
-   * @returns {Promise<any>}
-   */
   async eval(code) {
     try {
+      // First try: operation-based dispatch (safe, CSP-compliant)
       const result = await this.command('eval', { code });
       return result?.data;
     } catch (e) {
+      // Fallback: fast eval via daemon direct transport
       if (this._deps.fastEval) {
-        return await this._deps.fastEval(code);
+        try {
+          return await this._deps.fastEval(code);
+        } catch (fastErr) {
+          // If fastEval also fails, throw the original error
+          throw e;
+        }
       }
       throw e;
     }
   }
 
   /**
-   * Render JSX-like syntax in Figma via structured commands.
-   * @param {string} jsx - JSX string to render
+   * Execute a named eval operation using the safe operation-based dispatch.
+   * This is the preferred method — avoids raw code strings entirely.
+   * @param {string} op - Operation name (e.g. 'variables.list', 'canvas.info')
+   * @param {object} args - Operation arguments
    * @returns {Promise<any>}
    */
+  async evalOp(op, args = {}) {
+    const result = await this.command('eval', { op, args });
+    return result?.data;
+  }
+
   async render(jsx) {
     const { parseJSX } = await import('../parser/jsx.js');
     const { sendBatch } = await import('../transport/bridge.js');
@@ -226,12 +191,6 @@ export class CommandContext {
     return await sendBatch(commands);
   }
 
-  /**
-   * Send a structured command to the Figma plugin.
-   * @param {string} name - Command name
-   * @param {Object} params - Command parameters
-   * @returns {Promise<any>}
-   */
   async command(name, params = {}) {
     const { sendCommand } = await import('../transport/bridge.js');
     return await sendCommand(name, params);

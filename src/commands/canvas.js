@@ -8,44 +8,14 @@ class CanvasInfoCommand extends Command {
 
   async execute(ctx) {
     try {
-      const code = `
-        const selection = figma.currentPage.selection;
-        if (selection.length === 0) {
-          return {
-            selection: [],
-            message: 'No nodes selected',
-            page: {
-              id: figma.currentPage.id,
-              name: figma.currentPage.name
-            }
-          };
-        }
-        
-        return {
-          selection: selection.map(n => ({
-            id: n.id,
-            name: n.name,
-            type: n.type,
-            width: Math.round(n.width),
-            height: Math.round(n.height),
-            x: Math.round(n.x),
-            y: Math.round(n.y)
-          })),
-          page: {
-            id: figma.currentPage.id,
-            name: figma.currentPage.name
-          }
-        };
-      `;
-      
-      const result = await ctx.eval(code);
+      const result = await ctx.evalOp('canvas.info');
       const selection = result?.selection || [];
       const payload = {
         page: result?.page || null,
         selection,
         selectionCount: selection.length,
       };
-      
+
       if (selection.length === 0) {
         ctx.output(
           { ...payload, message: 'No nodes are currently selected in Figma.' },
