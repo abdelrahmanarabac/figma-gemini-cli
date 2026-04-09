@@ -58,7 +58,8 @@ const result = await run(ctx, jsx, { mode: 'Light' });
 ## 🎨 Design Standards
 
 ### Module Safety
-- Use `ctx.render()`, `ctx.eval()`, `ctx.command()`, `ctx.getPipeline()`
+- Use `ctx.evalOp()` and operation handlers for Figma interactions.
+- Leverage dynamic configurations rather than hardcoded metrics when available from the environment.
 
 ### Auto Layout Mandates
 - All Frames: explicit `w` + `h` (numbers, `fill`, or `hug`)
@@ -89,6 +90,8 @@ const result = await run(ctx, jsx, { mode: 'Light' });
 | `padding={24}` | `p={24}`, `px`, `py`, `pt`, `pr`, `pb`, `pl` |
 | `layout={row}` | `flex={row}` or `flex={col}` |
 | `alignItems` / `justifyContent` | `items` / `justify` |
+| Mixing UI and Logic in Plugin code | Separate explicitly into `/ui` and `/logic` directories in `plugin/` |
+| Hardcoding framework data (e.g., Tailwind) | Use token-based APIs like `tokens preset` to drive styles dynamically |
 
 ---
 
@@ -99,78 +102,3 @@ const result = await run(ctx, jsx, { mode: 'Light' });
 4. ✅ No temp files created?
 5. ✅ Guardian passed all rules?
 6. ✅ A11y confirmed WCAG contrast?
-
----
-
-## 💾 Hardcoded Data Context
-
-Do not generate JavaScript code that hardcodes these design tokens, UI copy, and icon subsets. Rely on your internal knowledge of them when styling or composing UI components.
-
-### 🎨 Design Tokens
-
-#### Semantic Tokens
-- `color/primary`: `#3b82f6` (Primary brand color)
-- `color/primary-hover`: `#2563eb` (Primary hover state)
-- `color/primary-light`: `#dbeafe` (Primary light/bg state)
-- `color/on-primary`: `#ffffff` (Text on primary)
-- `color/secondary`: `#64748b` (Secondary/muted color)
-- `color/surface`: `#ffffff` (Default surface background)
-- `color/surface-elevated`: `#f8fafc` (Elevated surface - cards)
-- `color/surface-elevated-dark`: `#334155` (Dark elevated surface)
-- `color/surface-muted`: `#f8fafc` (Muted surface)
-- `color/surface-active`: `#e2e8f0` (Active surface)
-- `color/surface-inverse`: `#111827` (Inverse surface)
-- `color/surface-inverse-dark`: `#1e293b` (Dark inverse surface)
-- `color/surface-dark`: `#0f172a` (Dark surface)
-- `color/on-surface`: `#0f172a` (Text on surface)
-- `color/on-surface-muted`: `#64748b` (Secondary text)
-- `color/on-surface-variant`: `#374151` (Tertiary text)
-- `color/on-surface-active`: `#f1f5f9` (Active text)
-- `color/on-surface-inverse`: `#ffffff` (Text on inverse surface)
-- `color/destructive`: `#ef4444` (Error/destructive actions)
-- `color/destructive-light`: `#fef2f2` (Error background)
-- `color/on-destructive`: `#ffffff` (Text on destructive)
-- `color/success`: `#22c55e` (Success states)
-- `color/success-light`: `#ecfdf5` (Success background)
-- `color/warning`: `#f59e0b` (Warning states)
-- `color/warning-light`: `#fffbeb` (Warning background)
-- `color/info`: `#3b82f6` (Info states)
-- `color/info-light`: `#eff6ff` (Info background)
-- `color/border`: `#e2e8f0` (Default border color)
-- `color/border-strong`: `#cbd5e1` (Emphasized borders)
-- `color/border-light`: `#f1f5f9` (Light borders)
-- `color/border-dark`: `#475569` (Dark borders)
-
-#### Spacing Tokens
-- `spacing/xs`: `4`
-- `spacing/sm`: `8`
-- `spacing/md`: `16`
-- `spacing/lg`: `24`
-- `spacing/xl`: `32`
-- `spacing/2xl`: `48`
-- `spacing/3xl`: `64`
-
-#### Radius Tokens
-- `radius/none`: `0`
-- `radius/sm`: `4`
-- `radius/md`: `8`
-- `radius/lg`: `12`
-- `radius/xl`: `16`
-- `radius/2xl`: `24`
-- `radius/full`: `9999`
-
-### ✏️ UX Copy Patterns
-- **Auth**: `['Sign In', 'Create Account', 'Forgot Password', 'Welcome back']`
-- **Dash**: `['Overview', 'Analytics', 'Recent Activity', 'Settings', 'Revenue']`
-- **Data**: `['Users', 'Transactions', 'Active', 'Pending', 'Action required']`
-- **Errors**: `['Invalid email address', 'Password too short', 'Connection failed']`
-- **Empty States**: `['No data found', 'Create your first project', 'Get started by adding...']`
-- **Feedback**: `['Changes saved successfully', 'Error deleting item', 'Are you sure?']`
-- **Pricing**: `['Starter', 'Pro', 'Enterprise', '$12/mo', 'Contact Sales', 'Most popular']`
-
-### 🖼️ Core SVGs (Icons)
-When you need to output SVG strings inline, generate minimalist, standard React/Figma friendly `<SVG content='<svg>...</svg>' />` elements. Below are the standard roles expected:
-- **`arrow-right`**, **`arrow-left`**, **`arrow-up`**, **`arrow-down`**, **`chevron-right`**, **`chevron-down`**
-- **`close`**, **`check`**, **`plus`**, **`minus`**
-- **`search`**, **`user`**, **`settings`**, **`bell`**, **`home`**
-- **`trash`**, **`edit`**, **`copy`**, **`link`**, **`external-link`**

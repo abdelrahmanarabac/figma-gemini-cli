@@ -43,11 +43,6 @@ function contrastRatio(rgb1, rgb2) {
 
 // ── Guardian Rules ───────────────────────────────────
 
-const KNOWN_TOKEN_PREFIXES = [
-  'color/', 'spacing/', 'radius/', 'font/', 'shadow/',
-  'primary', 'secondary', 'surface', 'destructive', 'success', 'warning', 'info',
-];
-
 const SPACING_SCALE = new Set([
   0, 2, 4, 6, 8, 10, 12, 14, 16, 20, 24, 28, 32, 36, 40, 44, 48, 56, 64, 80, 96, 112, 128,
 ]);
@@ -70,16 +65,10 @@ const GUARDIAN_RULES = {
     check(cmd, context = {}) {
       const props = cmd.params?.props || {};
       const violations = [];
-      for (const prop of ['fill', 'stroke']) {
+      for (const prop of ['fill', 'stroke', 'color']) {
         const val = props[prop];
-        if (typeof val === 'string' && val.startsWith('#') && !KNOWN_TOKEN_PREFIXES.some(p => val.startsWith(p))) {
-          const tokenSet = context.tokens?.semantic || {};
-          const isResolvedToken = Object.values(tokenSet).some(
-            t => t && t.value && t.value.trim().toLowerCase() === val.trim().toLowerCase()
-          );
-          if (!isResolvedToken) {
-            violations.push({ prop, value: val });
-          }
+        if (typeof val === 'string' && val.startsWith('#')) {
+          violations.push({ prop, value: val });
         }
       }
       return violations;

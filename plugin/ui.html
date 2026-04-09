@@ -64,8 +64,8 @@
         ws.onopen = () => {
           setStatus('Connected', 'connected');
           currentPortIndex = 0;
-          parent.postMessage({ pluginMessage: { type: 'connected' } }, '*');
-          ws.send(JSON.stringify({ type: 'hello', mode: 'plugin', version: '2.0.0' }));
+          // Request file info from plugin main thread
+          parent.postMessage({ pluginMessage: { type: 'getFileInfo' } }, '*');
         };
 
         ws.onmessage = (event) => {
@@ -110,9 +110,29 @@
     }
 
     // Receive results from plugin main thread → send to daemon
+    // Also handles file info for multi-file mode
+    let fileInfo = null;
     window.onmessage = (event) => {
       const msg = event.data.pluginMessage;
       if (!msg) return;
+
+      // Store file info when main thread sends it
+      if (msg.type === 'fileInfo') {
+        fileInfo = msg;
+        // Send hello with file info
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({
+            type: 'hello',
+            mode: 'plugin',
+            version: '2.1.0',
+            fileId: msg.fileId,
+            fileName: msg.fileName,
+            multiFile: true,
+          }));
+          setStatus(`Connected: ${msg.fileName}`, 'connected');
+        }
+        return;
+      }
 
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify(msg));

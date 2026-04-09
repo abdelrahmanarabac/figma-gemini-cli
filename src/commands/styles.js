@@ -107,6 +107,44 @@ class StyleUpdateCommand extends Command {
   }
 }
 
+class StyleCreateEffectCommand extends Command {
+  name = 'style create-effect <name>';
+  description = 'Create an effect (shadow/blur) style';
+  needsConnection = true;
+  options = [
+    { flags: '--effects <json>', description: 'Effects array as JSON string' }
+  ];
+
+  async execute(ctx, options, name) {
+    let effects;
+    if (options.effects) {
+      try {
+        effects = JSON.parse(options.effects);
+      } catch {
+        ctx.logError('Invalid JSON for --effects flag');
+        return;
+      }
+    } else {
+      ctx.logError('Provide --effects as JSON array. Example: --effects \'[{"type":"DROP_SHADOW","color":{"r":0,"g":0,"b":0,"a":0.1},"offset":{"x":0,"y":4},"radius":6,"spread":-1,"visible":true,"blendMode":"NORMAL"}]\'');
+      return;
+    }
+
+    const spinner = ctx.startSpinner(`Creating effect style "${name}"...`);
+    try {
+      const { data } = await ctx.command('style.create_effect', { name, effects });
+      spinner?.stop();
+
+      ctx.output(
+        { success: true, id: data.id, name: data.name, created: data.created },
+        () => console.log(chalk.green(`\n  ✓ Created effect style: ${chalk.bold(name)} (ID: ${data.id})\n`))
+      );
+    } catch (err) {
+      spinner?.fail(`Failed to create effect style "${name}"`);
+      ctx.logError(err.message);
+    }
+  }
+}
+
 class StyleMaterial3Command extends Command {
   name = 'style material3';
   description = 'Create Material 3 typography text styles from the shared token system';

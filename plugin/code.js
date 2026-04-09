@@ -188,7 +188,7 @@ async function executeEvalOperation(op, args) {
         collections: collections.map(c => ({
           id: c.id,
           name: c.name,
-          modes: c.modes.map(m => ({ id: m.modeId, name: m.name })),
+          modes: c.modes.map(m => ({ modeId: m.modeId, name: m.name })),
           variableIds: c.variableIds,
         })),
         variables: variables.map(v => ({
@@ -196,6 +196,8 @@ async function executeEvalOperation(op, args) {
           name: v.name,
           type: v.resolvedType,
           collectionId: v.variableCollectionId,
+          valuesByMode: v.valuesByMode,
+          resolvedType: v.resolvedType,
         })),
       };
     }
@@ -276,15 +278,267 @@ async function executeEvalOperation(op, args) {
       return { success: true };
     }
 
+    case 'page.create': {
+      const { name } = args;
+      const newPage = figma.createPage();
+      if (name) newPage.name = name;
+      try { await figma.setCurrentPageAsync(newPage); } catch (e) {}
+      return { id: newPage.id, name: newPage.name };
+    }
+
+    case 'page.rename': {
+      const { id, name } = args;
+      const page = figma.root.children.find(p => p.id === id);
+      if (!page) return { error: 'Page not found' };
+      page.name = name;
+      return { success: true };
+    }
+
+    case 'page.delete': {
+      const { id } = args;
+      const page = figma.root.children.find(p => p.id === id);
+      if (!page) return { error: 'Page not found' };
+      if (figma.root.children.length <= 1) return { error: 'Cannot delete the only page' };
+      page.remove();
+      return { success: true };
+    }
+
+    case 'page.switch': {
+      const { id } = args;
+      const page = figma.root.children.find(p => p.id === id);
+      if (!page) return { error: 'Page not found' };
+      try { await figma.setCurrentPageAsync(page); } catch (e) {}
+      return { success: true };
+    }
+
+    case 'instance.create': {
+      const { componentId, x, y } = args;
+      const component = await figma.getNodeByIdAsync(componentId);
+      if (!component || (component.type !== 'COMPONENT' && component.type !== 'COMPONENT_SET')) return { error: 'Component not found' };
+      const instance = component.createInstance();
+      const posX = typeof x === 'number' ? x : 0;
+      const posY = typeof y === 'number' ? y : 0;
+      instance.x = posX;
+      instance.y = posY;
+      figma.currentPage.appendChild(instance);
+      return { success: true, id: instance.id, name: instance.name };
+    }
+
+    case 'instance.swap': {
+      const { instanceId, componentId } = args;
+      const instance = await figma.getNodeByIdAsync(instanceId);
+      if (!instance || instance.type !== 'INSTANCE') return { error: 'Instance not found or not an instance' };
+      const component = await figma.getNodeByIdAsync(componentId);
+      if (!component || (component.type !== 'COMPONENT' && component.type !== 'COMPONENT_SET')) return { error: 'Component not found' };
+      await instance.swapComponent(component);
+      return { success: true };
+    }
+
+    case 'instance.set_overrides': {
+      const { instanceId, propName, value } = args;
+      const instance = await figma.getNodeByIdAsync(instanceId);
+      if (!instance || instance.type !== 'INSTANCE') return { error: 'Instance not found' };
+      const props = instance.componentProperties;
+      if (!(propName in props)) return { error: `Property ${propName} not found on instance` };
+      instance.setProperties({ [propName]: value });
+      return { success: true };
+    }
+
+    case 'instance.update_text': {
+      const { instanceId, text } = args;
+      const instance = await figma.getNodeByIdAsync(instanceId);
+      if (!instance || instance.type !== 'INSTANCE') return { error: 'Instance not found' };
+      // Find first TEXT node in the instance and update its characters
+      function findTextNodes(node) {
+        const results = [];
+        if (node.type === 'TEXT') results.push(node);
+        if (node.children) {
+          for (const child of node.children) {
+            results.push(...findTextNodes(child));
+          }
+        }
+        return results;
+      }
+      const textNodes = findTextNodes(instance);
+      if (textNodes.length === 0) return { error: 'No text nodes found in instance' };
+      const textNode = textNodes[0];
+      const font = textNode.fontName || { family: 'Inter', style: 'Regular' };
+      await figma.loadFontAsync(font);
+      textNode.characters = text;
+      return { success: true, textNodeId: textNode.id };
+    }
+
+    case 'node.setAutoLayout': {
+      const { id, mode } = args;
+      const node = await figma.getNodeByIdAsync(id);
+      if (!node) return { error: 'Node not found' };
+      if (!('layoutMode' in node)) return { error: 'Node does not support autolayout' };
+      const modeMap = { 'row': 'HORIZONTAL', 'col': 'VERTICAL', 'none': 'NONE' };
+      node.layoutMode = modeMap[mode] || 'NONE';
+      return { success: true, id: node.id };
+    }
+
+    case 'node.bind': {
+      const { property, variableName, nodeIds } = args;
+      const variables = await figma.variables.getLocalVariablesAsync();
+      const v = variables.find(v => v.name === variableName || v.id === variableName);
+      if (!v) return { success: false, error: 'Variable not found.' };
+
+      let nodes = [];
+      if (nodeIds && nodeIds.length > 0) {
+        nodes = await Promise.all(nodeIds.map(id => figma.getNodeByIdAsync(id)));
+      } else {
+        nodes = figma.currentPage.selection;
+      }
+      if (nodes.length === 0) return { success: false, error: 'No nodes selected or provided.' };
+
+      const results = [];
+      for (const node of nodes) {
+        if (!node) continue;
+        try {
+          if (property === 'fill' || property === 'bg') {
+            node.fills = [{
+              type: 'SOLID',
+              color: { r: 0, g: 0, b: 0 },
+              boundVariables: { color: { type: 'VARIABLE_ALIAS', id: v.id } }
+            }];
+          } else if (property === 'stroke' || property === 'border') {
+            node.strokes = [{
+              type: 'SOLID',
+              color: { r: 0, g: 0, b: 0 },
+              boundVariables: { color: { type: 'VARIABLE_ALIAS', id: v.id } }
+            }];
+          } else if (property === 'gap' || property === 'spacing') {
+            node.setBoundVariable('itemSpacing', v);
+          } else if (property === 'radius' || property === 'rounded') {
+            node.setBoundVariable('cornerRadius', v);
+          } else if (property === 'padding') {
+            node.setBoundVariable('paddingTop', v);
+            node.setBoundVariable('paddingBottom', v);
+            node.setBoundVariable('paddingLeft', v);
+            node.setBoundVariable('paddingRight', v);
+          }
+          results.push(node.id);
+        } catch (e) {
+          console.warn('Bind error for node ' + node.id + ': ' + e.message);
+        }
+      }
+      return { success: true, count: results.length };
+    }
+
+    case 'proto.link': {
+      const { source, target, transition, duration, trigger } = args;
+      const options = { transition, duration, trigger };
+      async function findNode(query) {
+        if (query.includes(':')) {
+          const n = await figma.getNodeByIdAsync(query);
+          if (n) return n;
+        }
+        const nodes = figma.currentPage.findAll(n => n.name === query);
+        return nodes[0];
+      }
+      const sourceNode = await findNode(source);
+      const targetNode = await findNode(target);
+      if (!sourceNode) return { success: false, error: "Source node '" + source + "' not found." };
+      if (!targetNode) return { success: false, error: "Target node '" + target + "' not found." };
+      if (!('reactions' in sourceNode)) return { success: false, error: "Source node does not support interactions." };
+
+      let destinationNode = targetNode;
+      while (destinationNode.parent && destinationNode.parent.type !== 'PAGE') destinationNode = destinationNode.parent;
+
+      const actionObj = {
+        type: 'NODE',
+        destinationId: destinationNode.id,
+        navigation: 'NAVIGATE',
+        transition: { type: options.transition.toUpperCase(), easing: { type: 'EASE_IN_AND_OUT' }, duration: parseInt(options.duration, 10) }
+      };
+      if (options.transition.toUpperCase() === 'INSTANT') actionObj.transition = null;
+
+      const newReaction = { trigger: { type: options.trigger.toUpperCase() }, actions: [actionObj] };
+      const currentReactions = sourceNode.reactions || [];
+      const filteredReactions = currentReactions.filter(r => r.trigger.type !== newReaction.trigger.type);
+      const newReactions = filteredReactions.concat([newReaction]);
+      await sourceNode.setReactionsAsync(newReactions);
+
+      return { success: true, sourceName: sourceNode.name, targetName: destinationNode.name, trigger: newReaction.trigger.type, transition: newReaction.actions[0].transition ? newReaction.actions[0].transition.type : 'INSTANT' };
+    }
+
+    case 'audit.a11y': {
+      const { scope } = args;
+      const WHITE = { r: 255, g: 255, b: 255, hex: '#ffffff' };
+      function getLuminance(r, g, b) {
+        const a = [r, g, b].map(v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); });
+        return a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722;
+      }
+      function getContrast(rgb1, rgb2) {
+        const l1 = getLuminance(rgb1.r, rgb1.g, rgb1.b) + 0.05;
+        const l2 = getLuminance(rgb2.r, rgb2.g, rgb2.b) + 0.05;
+        return l1 > l2 ? l1 / l2 : l2 / l1;
+      }
+      function toHex(value) { return Math.round(value).toString(16).padStart(2, '0'); }
+      function isSolidPaint(paint) { return !!paint && paint.type === 'SOLID' && !!paint.color; }
+      function toRgb(color, opacity) {
+        const r = Math.round(color.r * 255), g = Math.round(color.g * 255), b = Math.round(color.b * 255);
+        return { r, g, b, opacity: opacity === undefined ? 1 : opacity, hex: '#' + toHex(r) + toHex(g) + toHex(b) };
+      }
+      function getSolidFill(node) {
+        if (!node || !('fills' in node)) return null;
+        if (!Array.isArray(node.fills)) return null;
+        const solid = node.fills.find(paint => paint.visible !== false && isSolidPaint(paint));
+        if (!solid) return null;
+        return toRgb(solid.color, solid.opacity);
+      }
+      function getParentBg(node) {
+        let parent = node.parent;
+        while (parent) {
+          const fill = getSolidFill(parent);
+          if (fill) return fill;
+          parent = parent.parent;
+        }
+        return WHITE;
+      }
+      function getThreshold(node) {
+        const fontSize = typeof node.fontSize === 'number' ? node.fontSize : 14;
+        const fontStyle = node.fontName && node.fontName !== figma.mixed ? String(node.fontName.style || '') : '';
+        const isLargeText = fontSize >= 18 || (fontSize >= 14 && /bold/i.test(fontStyle));
+        return isLargeText ? 3 : 4.5;
+      }
+
+      const roots = scope === 'all' && Array.isArray(figma.root.children) && figma.root.children.length > 0 ? figma.root.children : [figma.currentPage];
+      const failures = [];
+      let scanned = 0;
+
+      for (const root of roots) {
+        if (!root || typeof root.findAll !== 'function') continue;
+        const textNodes = root.findAll(node => node.type === 'TEXT');
+        for (const textNode of textNodes) {
+          scanned++;
+          if (!textNode.visible || !textNode.characters) continue;
+          const textRgb = getSolidFill(textNode);
+          if (!textRgb) continue;
+          const bgRgb = getParentBg(textNode);
+          const ratio = getContrast(textRgb, bgRgb);
+          const threshold = getThreshold(textNode);
+          if (ratio < threshold) {
+            failures.push({
+              id: textNode.id,
+              page: root.name || 'Untitled Page',
+              name: textNode.name,
+              text: textNode.characters,
+              ratio: ratio.toFixed(2),
+              threshold,
+              textColor: textRgb.hex,
+              bgHex: bgRgb.hex
+            });
+          }
+        }
+      }
+      return { scope, scanned, failures };
+    }
+
     case 'canvas.info': {
       const selection = figma.currentPage.selection;
-      if (selection.length === 0) {
-        return {
-          selection: [],
-          message: 'No nodes selected',
-          page: { id: figma.currentPage.id, name: figma.currentPage.name },
-        };
-      }
+      const frames = figma.currentPage.children.filter(n => n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'COMPONENT_SET' || n.type === 'INSTANCE');
       return {
         selection: selection.map(n => ({
           id: n.id,
@@ -296,7 +550,100 @@ async function executeEvalOperation(op, args) {
           y: Math.round(n.y),
         })),
         page: { id: figma.currentPage.id, name: figma.currentPage.name },
+        frames: frames.map(f => ({
+          id: f.id,
+          name: f.name,
+          type: f.type,
+          width: Math.round(f.width),
+          height: Math.round(f.height),
+          x: Math.round(f.x),
+          y: Math.round(f.y),
+        })),
       };
+    }
+
+    case 'node.copy': {
+      const { id } = args;
+      const node = await figma.getNodeByIdAsync(id);
+      if (!node) return { error: 'Node not found' };
+      const data = await serializeNode(node);
+      // Add raw properties recursively from serialized props
+      function addRawData(n) {
+        if (!n || !n.props) return;
+        var p = n.props;
+        // Map serialized props back to raw values
+        var layoutMode = p.flex === 'row' ? 'HORIZONTAL' : p.flex === 'col' ? 'VERTICAL' : 'NONE';
+        var padVal = p.p || 0;
+        n.raw = {
+          width: p.w === 'fill' ? 0 : p.w === 'hug' ? 0 : (typeof p.w === 'number' ? Math.round(p.w) : 0),
+          height: p.h === 'fill' ? 0 : p.h === 'hug' ? 0 : (typeof p.h === 'number' ? Math.round(p.h) : 0),
+          fills: [],
+          strokes: [],
+          cornerRadius: typeof p.rounded === 'number' ? Math.round(p.rounded) : 0,
+          strokeWeight: typeof p.strokeWidth === 'number' ? p.strokeWidth : 0,
+          layoutMode: layoutMode,
+          itemSpacing: typeof p.gap === 'number' ? Math.round(p.gap) : 0,
+          paddingLeft: typeof p.pl === 'number' ? p.pl : (typeof padVal === 'number' ? padVal : 0),
+          paddingRight: typeof p.pr === 'number' ? p.pr : (typeof padVal === 'number' ? padVal : 0),
+          paddingTop: typeof p.pt === 'number' ? p.pt : (typeof padVal === 'number' ? padVal : 0),
+          paddingBottom: typeof p.pb === 'number' ? p.pb : (typeof padVal === 'number' ? padVal : 0),
+          primaryAxisAlignItems: p.justify || 'MIN',
+          counterAxisAlignItems: p.items || 'MIN',
+          layoutWrap: p.wrap ? 'WRAP' : 'NO_WRAP',
+          clipsContent: false,
+        };
+        // Fills - from props
+        if (p.fill && typeof p.fill === 'string' && p.fill.startsWith('#')) {
+          var hex = p.fill.replace('#', '');
+          n.raw.fills = [{ type: 'SOLID', color: { r: parseInt(hex.substring(0,2),16)/255, g: parseInt(hex.substring(2,4),16)/255, b: parseInt(hex.substring(4,6),16)/255, a: 1 } }];
+        }
+        // Strokes - from props
+        if (p.stroke && typeof p.stroke === 'string' && p.stroke.startsWith('#')) {
+          var shex = p.stroke.replace('#', '');
+          n.raw.strokes = [{ type: 'SOLID', color: { r: parseInt(shex.substring(0,2),16)/255, g: parseInt(shex.substring(2,4),16)/255, b: parseInt(shex.substring(4,6),16)/255, a: 1 } }];
+        }
+        // Text properties
+        if (n.type === 'TEXT') {
+          n.raw.characters = p.text || p.characters || '';
+          n.raw.fontSize = p.size || 14;
+          var fw = (p.weight || 'regular').toLowerCase();
+          var styleMap = { thin: 'Thin', light: 'Light', regular: 'Regular', medium: 'Medium', semibold: 'Semi Bold', bold: 'Bold' };
+          n.raw.fontName = { family: 'Inter', style: styleMap[fw] || 'Regular' };
+          n.raw.textAlignHorizontal = 'LEFT';
+          n.raw.textAlignVertical = 'TOP';
+        }
+        // Children
+        if (n.children && n.children.length > 0) {
+          for (var i = 0; i < n.children.length; i++) {
+            addRawData(n.children[i]);
+          }
+        }
+      }
+      addRawData(data);
+      return data;
+    }
+
+    case 'node.paste': {
+      const { data } = args;
+      if (!data) return { error: 'No node data provided' };
+      if (!data.raw) return { error: 'No raw data in node' };
+
+      // Create node from data (handles children recursively)
+      var newNode = await createNodeFromData(data);
+      if (!newNode) return { error: 'Failed to create node' };
+
+      // Position on page
+      var maxX = 0;
+      var page = figma.currentPage;
+      for (var j = 0; j < page.children.length; j++) {
+        var rightEdge = page.children[j].x + page.children[j].width;
+        if (rightEdge > maxX) maxX = rightEdge;
+      }
+      newNode.x = maxX + 200;
+      newNode.y = 0;
+      page.appendChild(newNode);
+
+      return { success: true, id: newNode.id, name: newNode.name };
     }
 
     case 'node.inspect': {
@@ -328,12 +675,80 @@ async function executeEvalOperation(op, args) {
       return sel.map(n => ({ id: n.id, name: n.name, type: n.type }));
     }
 
+    case 'selection.details': {
+      const sel = figma.currentPage.selection;
+      const results = [];
+      for (const n of sel) {
+        let parentPage = null;
+        let p = n.parent;
+        while (p) {
+          if (p.type === 'PAGE') { parentPage = { id: p.id, name: p.name }; break; }
+          p = p.parent;
+        }
+        results.push({ id: n.id, name: n.name, type: n.type, page: parentPage });
+      }
+      return { selection: results, currentPage: { id: figma.currentPage.id, name: figma.currentPage.name } };
+    }
+
+    case 'node.to_component': {
+      const { id } = args;
+      const sel = figma.currentPage.selection;
+      const nodeId = id || (sel.length > 0 ? sel[0].id : null);
+      const node = nodeId ? await figma.getNodeByIdAsync(nodeId) : null;
+      if (!node) return { error: 'Node not found' };
+      if (node.type === 'COMPONENT') return { id: node.id, name: node.name };
+      
+      const comp = figma.createComponent();
+      comp.name = node.name;
+      comp.resize(node.width, node.height);
+      comp.x = node.x; comp.y = node.y;
+      if (node.parent) node.parent.insertChild(node.parent.children.indexOf(node), comp);
+      comp.appendChild(node);
+      node.x = 0; node.y = 0;
+      return { id: comp.id, name: comp.name };
+    }
+
     case 'node.setSelection': {
+      const { id, ids } = args;
+      const targetIds = ids || (id ? [id] : []);
+      const nodes = await Promise.all(targetIds.map(tid => figma.getNodeByIdAsync(tid)));
+      const validNodes = nodes.filter(n => n && 'type' in n);
+      if (validNodes.length === 0) return { error: 'No nodes found' };
+      figma.currentPage.selection = validNodes;
+      return { success: true, count: validNodes.length };
+    }
+
+    case 'node.clone': {
+      const { id, targetPageId } = args;
+      const src = await figma.getNodeByIdAsync(id);
+      if (!src) return { error: 'Source node not found' };
+      const clone = src.clone();
+
+      // Determine target page
+      let targetPage = figma.currentPage;
+      if (targetPageId) {
+        const p = await figma.getNodeByIdAsync(targetPageId);
+        if (p && p.type === 'PAGE') targetPage = p;
+      }
+
+      // Find rightmost position on target page
+      let maxX = 0;
+      for (const child of targetPage.children) {
+        const rightEdge = child.x + child.width;
+        if (rightEdge > maxX) maxX = rightEdge;
+      }
+      clone.x = maxX + 200;
+      clone.y = 0;
+      targetPage.appendChild(clone);
+      return { success: true, id: clone.id, name: clone.name, page: targetPage.name };
+    }
+
+    case 'node.delete': {
       const { id } = args;
       const node = await figma.getNodeByIdAsync(id);
       if (!node) return { error: 'Node not found' };
-      figma.currentPage.selection = [node];
-      return { success: true, id: node.id };
+      node.remove();
+      return { deleted: id };
     }
 
     case 'style.list': {
@@ -357,6 +772,16 @@ async function executeEvalOperation(op, args) {
       return { success: true, id: result.style.id, name: result.style.name, created: result.created };
     }
 
+    case 'style.create_effect': {
+      const { name, effects } = args;
+      const existingStyles = await figma.getLocalEffectStylesAsync();
+      const existing = existingStyles.find(s => s.name === name);
+      const style = existing || figma.createLocalEffectStyle();
+      style.name = name;
+      style.effects = effects;
+      return { success: true, id: style.id, name: style.name, created: !existing };
+    }
+
     case 'style.create_text_styles': {
       const styles = Array.isArray(args.styles) ? args.styles : [];
       const existingTextStyles = await figma.getLocalTextStylesAsync();
@@ -374,7 +799,7 @@ async function executeEvalOperation(op, args) {
       const effectStyles = await figma.getLocalEffectStylesAsync();
       const gridStyles = await figma.getLocalGridStylesAsync();
 
-      const all = [...textStyles, ...paintStyles, ...effectStyles, ...gridStyles];
+      const all = textStyles.concat(paintStyles).concat(effectStyles).concat(gridStyles);
       const count = all.length;
       for (const s of all) {
         try { s.remove(); } catch(e) {}
@@ -407,7 +832,7 @@ async function executeEvalOperation(op, args) {
       const col = collections.find(c => c.id === collectionRef || c.name === collectionRef);
       if (!col) return { success: false, error: 'Collection not found.' };
       const modeId = col.addMode(modeName);
-      return { success: true, modeId };
+      return { success: true, modeId, colName: col.name };
     }
 
     case 'mode.rename': {
@@ -431,6 +856,23 @@ async function executeEvalOperation(op, args) {
       if (col.modes.length <= 1) return { success: false, error: 'Cannot delete the last mode.' };
       col.deleteMode(mode.modeId);
       return { success: true };
+    }
+
+    case 'viewport.center': {
+      const { id } = args;
+      const node = id ? await figma.getNodeByIdAsync(id) : figma.currentPage.selection[0];
+      if (!node) return { error: 'No node ID provided and nothing selected.' };
+      figma.viewport.scrollAndZoomIntoView([node]);
+      return { id: node.id, name: node.name, type: node.type };
+    }
+
+    case 'viewport.select-and-zoom': {
+      const { query } = args;
+      const nodes = figma.currentPage.findAll(function(n) { return n.name.toLowerCase().includes(query.toLowerCase()); });
+      if (nodes.length === 0) return { error: 'No nodes matching: ' + query };
+      figma.currentPage.selection = nodes;
+      figma.viewport.scrollAndZoomIntoView(nodes);
+      return { found: nodes.length, ids: nodes.map(function(n) { return n.id; }) };
     }
 
     case 'page.list': {
@@ -475,57 +917,483 @@ async function executeEvalOperation(op, args) {
       };
     }
 
+    case 'node.find.byName': {
+      const { name } = args;
+      const node = figma.currentPage.findOne(n => n.name === name);
+      if (!node) return { error: 'Node not found: ' + name };
+      return { id: node.id, name: node.name, type: node.type };
+    }
+
+    case 'variable.set_value': {
+      const { variableName, modeName, value } = args;
+      const variables = await figma.variables.getLocalVariablesAsync();
+      const v = variables.find(v => v.name === variableName || v.id === variableName);
+      if (!v) return { success: false, error: 'Variable not found.' };
+
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const col = collections.find(c => c.id === v.variableCollectionId);
+      if (!col) return { success: false, error: 'Collection not found.' };
+
+      const mode = col.modes.find(m => m.name === modeName || m.modeId === modeName);
+      if (!mode) return { success: false, error: 'Mode not found.' };
+
+      async function parseValue(val, type) {
+        const cleanVal = val.startsWith('{') && val.endsWith('}') ? val.slice(1, -1) : val;
+        const target = variables.find(v => v.name === cleanVal || v.id === cleanVal);
+        if (target) return { type: 'VARIABLE_ALIAS', id: target.id };
+        if (type === 'COLOR') {
+          const hex = val.replace('#', '');
+          return {
+            r: parseInt(hex.substring(0, 2), 16) / 255,
+            g: parseInt(hex.substring(2, 4), 16) / 255,
+            b: parseInt(hex.substring(4, 6), 16) / 255,
+            a: 1
+          };
+        }
+        if (type === 'FLOAT') return parseFloat(val);
+        if (type === 'BOOLEAN') return val === 'true';
+        return val;
+      }
+
+      try {
+        const parsed = await parseValue(value, v.resolvedType);
+        v.setValueForMode(mode.modeId, parsed);
+        return { success: true };
+      } catch (e) {
+        return { success: false, error: e.message };
+      }
+    }
+
+    case 'mode.edit': {
+      const { collectionName, oldName, newName } = args;
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const col = collections.find(c => c.name === collectionName || c.id === collectionName);
+      if (!col) return { success: false, error: 'Collection not found.' };
+      const mode = col.modes.find(m => m.name === oldName || m.modeId === oldName);
+      if (!mode) return { success: false, error: 'Mode not found.' };
+      col.renameMode(mode.modeId, newName);
+      return { success: true, colName: col.name };
+    }
+
+    case 'mode.multi': {
+      const { collectionName, fromName, toName, strategy, factor, filterPrefix } = args;
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const col = collections.find(c => c.name === collectionName || c.id === collectionName);
+      if (!col) return { success: false, error: 'Collection not found: ' + collectionName };
+
+      const sourceMode = col.modes.find(m => m.name.toLowerCase() === fromName.toLowerCase());
+      if (!sourceMode) return { success: false, error: 'Source mode "' + fromName + '" not found.' };
+
+      let targetMode = col.modes.find(m => m.name.toLowerCase() === toName.toLowerCase());
+      if (!targetMode) {
+        try {
+          const newId = col.addMode(toName);
+          targetMode = { modeId: newId, name: toName };
+        } catch (e) {
+          return { success: false, error: 'Could not create target mode: ' + e.message };
+        }
+      }
+
+      const variables = await figma.variables.getLocalVariablesAsync();
+      const colVars = variables.filter(v => v.variableCollectionId === col.id);
+
+      function rgbToHsl(r, g, b) {
+        let max = Math.max(r, g, b), min = Math.min(r, g, b);
+        let h, s, l = (max + min) / 2;
+        if (max === min) { h = s = 0; }
+        else {
+          let d = max - min;
+          s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+          switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+          }
+          h /= 6;
+        }
+        return [h, s, l];
+      }
+
+      function hslToRgb(h, s, l) {
+        let r, g, b;
+        if (s === 0) { r = g = b = l; }
+        else {
+          const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+          const p = 2 * l - q;
+          const hue2rgb = (p, q, t) => {
+            if (t < 0) t += 1; if (t > 1) t -= 1;
+            if (t < 1/6) return p + (q - p) * 6 * t;
+            if (t < 1/2) return q;
+            if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            return p;
+          };
+          r = hue2rgb(p, q, h + 1/3);
+          g = hue2rgb(p, q, h);
+          b = hue2rgb(p, q, h - 1/3);
+        }
+        return { r, g, b };
+      }
+
+      function transformValue(v, sourceVal) {
+        if (filterPrefix && !v.name.startsWith(filterPrefix)) return sourceVal;
+        if (strategy === 'invert' && v.resolvedType === 'COLOR') {
+          const { r, g, b, a } = sourceVal;
+          const [h, s, l] = rgbToHsl(r, g, b);
+          const newL = 1 - l;
+          const rgb = hslToRgb(h, s, newL);
+          return { r: rgb.r, g: rgb.g, b: rgb.b, a: a };
+        }
+        if (strategy === 'scale' && v.resolvedType === 'FLOAT') {
+          return sourceVal * factor;
+        }
+        if (strategy === 'copy') return sourceVal;
+        return sourceVal;
+      }
+
+      let count = 0;
+      for (const v of colVars) {
+        const sourceValue = v.valuesByMode[sourceMode.modeId];
+        if (sourceValue === undefined) continue;
+        try {
+          const newValue = transformValue(v, sourceValue);
+          v.setValueForMode(targetMode.modeId, newValue);
+          count++;
+        } catch (err) { /* skip */ }
+      }
+      return { success: true, count, colName: col.name, targetModeName: targetMode.name };
+    }
+
+    case 'tokens.export': {
+      const collections = await figma.variables.getLocalVariableCollectionsAsync();
+      const variables = await figma.variables.getLocalVariablesAsync();
+      const cols = collections.map(c => ({
+        id: c.id,
+        name: c.name,
+        modes: c.modes.map(m => ({ modeId: m.modeId, name: m.name })),
+        variableIds: c.variableIds
+      }));
+      const vars = variables.map(v => {
+        const values = {};
+        for (const [modeId, val] of Object.entries(v.valuesByMode)) {
+          if (val && typeof val === 'object' && 'r' in val) {
+            const toHex = (n) => Math.round(n * 255).toString(16).padStart(2, '0');
+            values[modeId] = '#' + toHex(val.r) + toHex(val.g) + toHex(val.b);
+          } else if (val && typeof val === 'object' && 'type' in val && val.type === 'VARIABLE_ALIAS') {
+            values[modeId] = { alias: val.id };
+          } else {
+            values[modeId] = val;
+          }
+        }
+        return {
+          id: v.id,
+          name: v.name,
+          type: v.resolvedType,
+          collectionId: v.variableCollectionId,
+          values
+        };
+      });
+      return { collections: cols, variables: vars };
+    }
+
+    case 'script.run': {
+      const { code } = args;
+      try {
+        const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+        const fn = new AsyncFunction(code);
+        return await fn();
+      } catch (e) {
+        return { error: e.message };
+      }
+    }
+
     default:
       return { error: `Unknown operation: ${op}` };
   }
 }
 
-// Legacy code compatibility layer — maps known code patterns to operations.
-// This handles commands that still pass raw code strings via ctx.eval().
-async function executeLegacyCode(code) {
-  // Pattern 1: Variable listing
-  if (code.includes('getLocalVariableCollectionsAsync') && code.includes('getLocalVariablesAsync')) {
-    return await executeEvalOperation('variables.list', {});
+// ── Command Handlers ─────────────────────────────────
+
+// Helper: create a node from raw copy data (for recursive children)
+async function createNodeFromData(data) {
+  if (!data || !data.raw) return null;
+  const raw = data.raw;
+
+  var newNode;
+  if (data.type === 'TEXT') {
+    newNode = figma.createText();
+    try {
+      await figma.loadFontAsync(raw.fontName || { family: 'Inter', style: 'Regular' });
+      newNode.fontName = raw.fontName || { family: 'Inter', style: 'Regular' };
+    } catch(e) {
+      await figma.loadFontAsync({ family: 'Inter', style: 'Regular' });
+      newNode.fontName = { family: 'Inter', style: 'Regular' };
+    }
+    newNode.characters = raw.characters || '';
+    newNode.fontSize = raw.fontSize || 14;
+    if (raw.textAlignHorizontal) newNode.textAlignHorizontal = raw.textAlignHorizontal;
+    if (raw.textAlignVertical) newNode.textAlignVertical = raw.textAlignVertical;
+  } else if (data.type === 'ELLIPSE') {
+    newNode = figma.createEllipse();
+  } else if (data.type === 'RECTANGLE') {
+    newNode = figma.createRectangle();
+  } else if (data.type === 'LINE') {
+    newNode = figma.createLine();
+  } else {
+    newNode = figma.createFrame();
   }
 
-  // Pattern 2: Canvas info
-  if (code.includes('currentPage.selection') && code.includes('currentPage.name')) {
-    return await executeEvalOperation('canvas.info', {});
+  newNode.name = data.props.name || 'Pasted';
+  if (raw.width > 0 && raw.height > 0) newNode.resize(raw.width, raw.height);
+  if (raw.fills && raw.fills.length > 0) newNode.fills = raw.fills;
+  if (raw.strokes && raw.strokes.length > 0) {
+    newNode.strokes = raw.strokes;
+    newNode.strokeWeight = raw.strokeWeight || 1;
   }
+  if (raw.cornerRadius > 0 && 'cornerRadius' in newNode) newNode.cornerRadius = raw.cornerRadius;
 
-  // Pattern 3: Node inspect
-  if (code.includes('getNodeByIdAsync') && code.includes('selection')) {
-    return await executeEvalOperation('node.inspect', { id: null });
+  if (raw.layoutMode && raw.layoutMode !== 'NONE' && 'layoutMode' in newNode) {
+    newNode.layoutMode = raw.layoutMode;
+    newNode.itemSpacing = raw.itemSpacing;
+    newNode.paddingLeft = raw.paddingLeft;
+    newNode.paddingRight = raw.paddingRight;
+    newNode.paddingTop = raw.paddingTop;
+    newNode.paddingBottom = raw.paddingBottom;
+    newNode.primaryAxisAlignItems = raw.primaryAxisAlignItems;
+    newNode.counterAxisAlignItems = raw.counterAxisAlignItems;
+    newNode.layoutWrap = raw.layoutWrap;
   }
+  if ('clipsContent' in newNode) newNode.clipsContent = raw.clipsContent;
 
-  // Pattern 4: Style list
-  if (code.includes('getLocalTextStylesAsync') && code.includes('getLocalPaintStylesAsync')) {
-    return await executeEvalOperation('style.list', {});
-  }
-
-  // Pattern 5: Find nodes
-  if (code.includes('findAll') && code.includes('includes')) {
-    const match = code.match(/\.includes\(["']([^"']+)["']\)/);
-    if (match) {
-      return await executeEvalOperation('node.find', { query: match[1] });
+  // Children
+  if (data.children && data.children.length > 0) {
+    for (var i = 0; i < data.children.length; i++) {
+      var childNode = await createNodeFromData(data.children[i]);
+      if (childNode) newNode.appendChild(childNode);
     }
   }
 
-  // Pattern 6: Page info
-  if (code.includes('currentPage.name') && !code.includes('selection')) {
-    return {
-      page: { id: figma.currentPage.id, name: figma.currentPage.name },
-    };
-  }
-
-  return { error: 'Legacy code pattern not recognized. Use operation-based eval with { op, args }.' };
+  return newNode;
 }
-
-// ── Command Handlers ─────────────────────────────────
 
 const handlers = {
 
   'health': async () => ({ status: 'ok' }),
+
+  'render.jsx': async (params) => {
+    const { jsx } = params;
+    if (!jsx || typeof jsx !== 'string') return { error: 'No JSX provided' };
+
+    const { generator, errors } = parseJSXStream(jsx);
+    if (errors.length > 0) return { error: errors[0].message };
+
+    const registry = new Map();
+    let created = 0;
+    for (const cmd of generator) {
+      try {
+        const p = cmd.params || {};
+        if (p.parentId && registry.has(p.parentId)) p.parentId = registry.get(p.parentId);
+        const node = await createNodeTransaction(p.type, p.props || {}, p.parentId);
+        if (p.id) registry.set(p.id, node.id);
+        created++;
+      } catch (e) {
+        console.warn('Command failed:', e.message);
+      }
+    }
+    return { success: true, count: created };
+  },
+
+  'component.create_set': async (params) => {
+    const { name, childrenIds } = params;
+    const idList = Array.isArray(childrenIds) ? childrenIds : String(childrenIds || '').split(',').map(s => s.trim()).filter(Boolean);
+    const nodes = await Promise.all(idList.map(id => figma.getNodeByIdAsync(id)));
+
+    // DEBUG LOGS
+    nodes.forEach(n => {
+      if (n) console.log(`[FigCli] Found Node: ${n.id}, Type: ${n.type}, Name: ${n.name}`);
+      else console.log(`[FigCli] Node ID not found: ${idList[nodes.indexOf(n)]}`);
+    });
+
+    const validNodes = nodes.filter(n => n && (n.type === 'COMPONENT' || n.type === 'FRAME' || n.type === 'INSTANCE' || n.type === 'RECTANGLE' || n.type === 'ELLIPSE' || n.type === 'TEXT'));
+    console.log(`[FigCli] Valid Nodes for set creation: ${validNodes.length}`);
+    
+    // Convert non-components to components and move to current page
+    const components = await Promise.all(validNodes.map(async n => {
+      let target = n;
+      if (n.type !== 'COMPONENT') {
+        const comp = figma.createComponent();
+        comp.name = n.name;
+        comp.resize(n.width, n.height);
+        comp.x = n.x; comp.y = n.y;
+        comp.appendChild(n);
+        n.x = 0; n.y = 0;
+        target = comp;
+      }
+      // Move to page to ensure they can be combined
+      figma.currentPage.appendChild(target);
+      return target;
+    }));
+
+    if (components.length === 0) throw new Error('No valid nodes to combine into a component set.');
+
+    const componentSet = figma.combineAsVariants(components, figma.currentPage);
+    if (name) componentSet.name = name;
+    return { id: componentSet.id, name: componentSet.name };
+  },
+
+  'component.add_property': async (params) => {
+    const { id, name, type, defaultValue } = params;
+    const node = await figma.getNodeByIdAsync(id);
+    if (!node || node.type !== 'COMPONENT_SET') {
+      throw new Error('Target must be a Component Set.');
+    }
+    const propName = node.addComponentProperty(name, type.toUpperCase(), defaultValue);
+    return { propertyName: propName };
+  },
+
+  'component.rename_property': async (params) => {
+    const { id, oldName, newName } = params;
+    const node = await figma.getNodeByIdAsync(id);
+    if (!node || node.type !== 'COMPONENT_SET') {
+      throw new Error('Target must be a Component Set.');
+    }
+    node.renameComponentProperty(oldName, newName);
+    return { propertyName: newName };
+  },
+
+  'viewport.pan': async (params) => {
+    const { x, y } = params;
+    figma.viewport.scrollAndZoomIntoView([{ x: Number(x), y: Number(y) }]);
+    return { success: true, x: Number(x), y: Number(y) };
+  },
+
+  'viewport.zoom': async (params) => {
+    const { level } = params;
+    const node = figma.currentPage.selection[0];
+    if (node) {
+      figma.viewport.scrollAndZoomIntoView([node]);
+    }
+    return { success: true, level };
+  },
+
+  'viewport.center': async (params) => {
+    const { id } = params;
+    const node = id ? await figma.getNodeByIdAsync(id) : figma.currentPage.selection[0];
+    if (!node) return { error: 'No node ID provided and nothing selected.' };
+    figma.viewport.scrollAndZoomIntoView([node]);
+    figma.currentPage.selection = [node];
+    return { id: node.id, name: node.name, type: node.type };
+  },
+
+  'viewport.select-and-zoom': async (params) => {
+    const { query } = params;
+    const nodes = figma.currentPage.findAll(function(n) { return n.name.toLowerCase().includes(query.toLowerCase()); });
+    if (nodes.length === 0) return { error: 'No nodes matching: ' + query };
+    figma.currentPage.selection = nodes;
+    figma.viewport.scrollAndZoomIntoView(nodes);
+    return { found: nodes.length, ids: nodes.map(function(n) { return n.id; }) };
+  },
+
+  'component.inspect': async (params) => {
+    const { id } = params;
+    const node = await figma.getNodeByIdAsync(id);
+    if (!node || node.type !== 'COMPONENT_SET') {
+      throw new Error('Target must be a Component Set.');
+    }
+    const props = {};
+    for (const [key, def] of Object.entries(node.componentPropertyDefinitions)) {
+      props[key] = {
+        type: def.type,
+        defaultValue: def.defaultValue,
+        variantOptions: def.variantOptions || null,
+        preferredValues: def.preferredValues || null,
+      };
+    }
+    return {
+      id: node.id,
+      name: node.name,
+      properties: props,
+      variants: node.children.map(function(c) {
+        return { id: c.id, name: c.name, componentProperties: c.componentProperties };
+      }),
+    };
+  },
+
+  'component.update_text': async (params) => {
+    const { id, text } = params;
+    const node = await figma.getNodeByIdAsync(id);
+    if (!node || node.type !== 'COMPONENT_SET') {
+      throw new Error('Target must be a Component Set.');
+    }
+    let updated = 0;
+    for (var i = 0; i < node.children.length; i++) {
+      var variant = node.children[i];
+      var texts = variant.findAll(function(n) { return n.type === 'TEXT'; });
+      for (var j = 0; j < texts.length; j++) {
+        if (texts[j].characters === '' || texts[j].characters === undefined) {
+          try { texts[j].characters = text; updated++; } catch(e) {}
+        }
+      }
+    }
+    return { updated: updated, totalVariants: node.children.length };
+  },
+
+  'component.delete_property': async (params) => {
+    const { id, name } = params;
+    const node = await figma.getNodeByIdAsync(id);
+    if (!node) throw new Error('Node not found.');
+    if (node.type !== 'COMPONENT_SET') {
+      throw new Error('Target must be a Component Set.');
+    }
+    
+    const keys = Object.keys(node.componentPropertyDefinitions);
+    console.log('[FigCli] component keys:', keys);
+    console.log('[FigCli] looking for:', JSON.stringify(name));
+    
+    // Find the matching key - check both key and def.name
+    var found = null;
+    for (var k = 0; k < keys.length; k++) {
+      var def = node.componentPropertyDefinitions[keys[k]];
+      console.log('[FigCli] key:', JSON.stringify(keys[k]), 'def.name:', JSON.stringify(def.name));
+      if (keys[k] === name || def.name === name) {
+        found = keys[k];
+        break;
+      }
+    }
+    if (!found) {
+      throw new Error('Property "' + name + '" not found. Available: ' + keys.join(', '));
+    }
+    console.log('[FigCli] deleting key:', found);
+    
+    // Remove property from all child variant names before deleting
+    for (var i = 0; i < node.children.length; i++) {
+      var child = node.children[i];
+      if (child.type === 'COMPONENT') {
+        var parts = child.name.split(',').map(function(p) { return p.trim(); });
+        var newParts = parts.filter(function(p) {
+          return !p.startsWith(found + '=');
+        });
+        child.name = newParts.join(', ');
+      }
+    }
+    
+    node.deleteComponentProperty(found);
+    return { deleted: found };
+  },
+
+  'component.set_property': async (params) => {
+    const { id, propertyName, value } = params;
+    const node = await figma.getNodeByIdAsync(id);
+    if (!node || node.type !== 'COMPONENT') {
+      throw new Error('Target must be a Component (Variant).');
+    }
+    
+    const parts = node.name.split(',').map(p => p.trim());
+    const newParts = parts.filter(p => !p.startsWith(`${propertyName}=`));
+    newParts.push(`${propertyName}=${value}`);
+    node.name = newParts.join(', ');
+    
+    return { name: node.name };
+  },
 
   'tokens.delete_all': async () => {
     const collections = await figma.variables.getLocalVariableCollectionsAsync();
@@ -562,7 +1430,7 @@ const handlers = {
     const effectStyles = await figma.getLocalEffectStylesAsync();
     const gridStyles = await figma.getLocalGridStylesAsync();
 
-    const all = [...textStyles, ...paintStyles, ...effectStyles, ...gridStyles];
+    const all = textStyles.concat(paintStyles).concat(effectStyles).concat(gridStyles);
     const count = all.length;
     for (const s of all) {
       try { s.remove(); } catch(e) {}
@@ -911,21 +1779,13 @@ const handlers = {
 
   'eval': async (params) => {
     try {
-      // Figma plugin main thread does NOT support AsyncFunction constructor (CSP restriction).
-      // Instead, we use a safe dispatcher that maps 'op' to known Figma API operations.
-      const { op, code, args = {} } = params;
+      const { op, args = {} } = params;
 
       if (op) {
-        // Operation-based dispatch — safe, no dynamic eval needed
         return await executeEvalOperation(op, args);
       }
 
-      // Legacy fallback: if code is provided without op, try to execute known patterns
-      if (code) {
-        return await executeLegacyCode(code);
-      }
-
-      return { error: 'No operation or code provided' };
+      return { error: 'No operation provided. Use ctx.evalOp() with a valid operation name.' };
     } catch (err) {
       throw new Error(`Eval failed: ${err.message}`);
     }
@@ -1150,7 +2010,7 @@ const handlers = {
           } catch (e) {}
           
           if ('children' in activeNode) {
-            const children = [...activeNode.children];
+            const children = Array.from(activeNode.children);
             for (const child of children) {
               await skeletonize(child, depth + 1);
             }
@@ -1417,7 +2277,7 @@ function parseColor(str) {
 
 function parseShadow(str) {
   if (!str || typeof str !== 'string') return null;
-  
+
   // Extract color part (hex or rgba)
   const colorMatch = str.match(/(?:#[a-fA-F0-9]{3,6}|rgba?\s*\([^)]+\))/);
   const colorStr = colorMatch ? colorMatch[0] : '#000000';
@@ -1471,8 +2331,74 @@ function parseInnerShadow(str) {
 }
 
 async function parseGradient(str) {
-  if (!str || typeof str !== 'string' || !str.includes('gradient')) return null;
+  if (!str || typeof str !== 'string') return null;
 
+  // Support custom shorthand format: linear-135-color/primary-color/surface-alt
+  if (str.startsWith('linear-') && !str.includes('(')) {
+    // Extract angle and color tokens using regex
+    // Format: linear-{angle}-color/{name}-color/{name}
+    const match = str.match(/^linear-(\d+)-(.+)$/);
+    if (!match) return null;
+
+    const angle = parseFloat(match[1]) || 180;
+    // Split by "-color/" to get color tokens, preserving hyphens in names
+    const afterAngle = match[2];
+    const colorTokens = afterAngle.split(/-color\//).map((t, i) => i === 0 ? t : 'color/' + t);
+    if (colorTokens.length < 2) return null;
+
+    const stops = await Promise.all(colorTokens.map(async (token, i) => {
+      const v = await findVariableByName(token);
+      let color = null;
+
+      if (v) {
+        try {
+          if (v.valuesByMode) {
+            const modeIds = Object.keys(v.valuesByMode);
+            if (modeIds.length > 0) {
+              const val = v.valuesByMode[modeIds[0]];
+              if (val && typeof val === 'object' && 'r' in val) {
+                color = { r: val.r, g: val.g, b: val.b, a: val.a !== undefined ? val.a : 1 };
+              }
+            }
+          }
+        } catch(e) {
+          console.warn('Gradient var resolve error for', token, e.message);
+        }
+      }
+
+      if (!color) {
+        color = parseColor(token);
+      }
+
+      if (!color) return null;
+
+      const position = i / (colorTokens.length - 1);
+
+      const stop = {
+        color: { r: color.r, g: color.g, b: color.b, a: color.a !== undefined ? color.a : 1 },
+        position
+      };
+      return stop;
+    }));
+
+    // Filter out any stops that failed to resolve
+    const resolvedStops = stops.filter(Boolean);
+    if (resolvedStops.length < 2) return null;
+
+    const rad = (angle - 90) * (Math.PI / 180);
+    const cos = Math.cos(rad);
+    const sin = Math.sin(rad);
+    return {
+      type: 'GRADIENT_LINEAR',
+      gradientStops: stops,
+      gradientTransform: [
+        [cos, sin, (1 - cos - sin) / 2],
+        [-sin, cos, (1 + sin - cos) / 2]
+      ]
+    };
+  }
+
+  // Standard CSS gradient syntax
   const isLinear = str.startsWith('linear-gradient');
   const isRadial = str.startsWith('radial-gradient');
   const isAngular = str.startsWith('conic-gradient');
@@ -1601,6 +2527,12 @@ async function serializeNode(node) {
   } else if (!hasALParent) {
     props.x = Math.round(node.x);
     props.y = Math.round(node.y);
+  }
+
+  // Overflow / Scroll
+  if ('overflow' in node && node.overflow && node.overflow !== 'VISIBLE') {
+    const ovMap = { 'SCROLLS': 'scroll', 'SCROLLS_VERTICAL': 'vertical', 'SCROLLS_HORIZONTAL': 'horizontal' };
+    props.overflow = ovMap[node.overflow] || node.overflow;
   }
 
   // 3. Layout (Self)
@@ -1967,6 +2899,12 @@ async function applyPropsToNode(node, props) {
     node.fills = []; // Frames transparent by default if not specified
   }
 
+  if (props.bgGradient) {
+    const gradient = await parseGradient(props.bgGradient);
+    if (gradient) {
+      node.fills = [gradient];
+    }
+  }
 
   if (props.stroke) {
     const v = await findVariableByName(props.stroke);
@@ -2051,6 +2989,18 @@ async function applyPropsToNode(node, props) {
   if (props.counterAxisSpacing !== undefined && 'counterAxisSpacing' in node) node.counterAxisSpacing = props.counterAxisSpacing;
   if (props.layoutWrap && 'layoutWrap' in node) node.layoutWrap = props.layoutWrap;
 
+  // Overflow / Scroll behavior
+  if (props.overflow && 'overflow' in node) {
+    const ovMap = { scroll: 'SCROLLS', vertical: 'SCROLLS_VERTICAL', horizontal: 'SCROLLS_HORIZONTAL' };
+    const val = String(props.overflow).toUpperCase();
+    // Handle both already-transformed values and raw input
+    if (['SCROLLS', 'SCROLLS_VERTICAL', 'SCROLLS_HORIZONTAL'].includes(val)) {
+      node.overflow = val;
+    } else {
+      node.overflow = ovMap[String(props.overflow).toLowerCase()] || props.overflow;
+    }
+  }
+
   if (props.primaryAxisAlignItems && 'primaryAxisAlignItems' in node) node.primaryAxisAlignItems = props.primaryAxisAlignItems;
   if (props.counterAxisAlignItems && 'counterAxisAlignItems' in node) node.counterAxisAlignItems = props.counterAxisAlignItems;
 
@@ -2119,9 +3069,31 @@ async function applyPropsToNode(node, props) {
 }
 
 figma.ui.onmessage = async (msg) => {
+  // Handle file info request from UI (for multi-file mode)
+  if (msg.type === 'getFileInfo') {
+    var fileId = figma.fileKey;
+    if (!fileId) {
+      var rootName = (figma.root && figma.root.name) || 'root';
+      fileId = 'file_' + rootName.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
+    }
+    var fileName = (figma.root && figma.root.name) || (figma.currentPage && figma.currentPage.name) || 'Untitled';
+    figma.ui.postMessage({ type: 'fileInfo', fileId: fileId, fileName: fileName });
+  }
+
+  // Handle connected notification
+  if (msg.type === 'connected') {
+    var fileId = figma.fileKey;
+    if (!fileId) {
+      var rootName = (figma.root && figma.root.name) || 'root';
+      fileId = 'file_' + rootName.replace(/[^a-zA-Z0-9]/g, '_') + '_' + Date.now();
+    }
+    var fileName = (figma.root && figma.root.name) || (figma.currentPage && figma.currentPage.name) || 'Untitled';
+    figma.ui.postMessage({ type: 'fileInfo', fileId: fileId, fileName: fileName });
+  }
+
   // 1. Resolve handler (streaming action OR single command)
-  const actionName = (msg.action === 'command') ? msg.command : (msg.action || msg.command);
-  const handler = handlers[actionName];
+  var actionName = (msg.action === 'command') ? msg.command : (msg.action || msg.command);
+  var handler = handlers[actionName];
 
   if (handler) {
     try {

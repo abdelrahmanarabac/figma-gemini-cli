@@ -1,12 +1,38 @@
 import { Command as Commander } from 'commander';
-import { readdirSync } from 'fs';
+import { readdirSync, readFileSync, writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 import { pathToFileURL } from 'url';
 import chalk from 'chalk';
 import { CommandContext } from './context.js';
 import { Command } from './command.js';
-import { detectAndDocumentError } from '../utils/error-memory.js';
 import { checkHealth } from '../transport/bridge.js';
+
+const ERROR_PATTERNS = [
+  {
+    id: 'powershell-ampersand',
+    regex: /'&&' is not a valid statement separator|The token '&&' is not a valid statement separator/i,
+    title: 'Known CLI Issue: PowerShell `&&` Operator',
+    problem: 'Windows PowerShell does not support `&&` command chaining like Bash.',
+    solution: 'Use separate commands instead:\n\n```powershell\ncommand1\ncommand2\n```\n\nOr run the CLI inside **Git Bash / WSL / modern PowerShell**.'
+  }
+];
+
+function detectAndDocumentError(errorMessage) {
+  if (!errorMessage) return;
+  const geminiPath = join(process.cwd(), 'GEMINI.md');
+
+  for (const pattern of ERROR_PATTERNS) {
+    if (pattern.regex.test(errorMessage)) {
+      if (!existsSync(geminiPath)) continue;
+      try {
+        let content = readFileSync(geminiPath, 'utf8');
+        if (content.includes(pattern.title)) continue;
+        const entry = `\n## ${pattern.title}\n\nProblem:\n${pattern.problem}\n\nSolution:\n${pattern.solution}\n`;
+        writeFileSync(geminiPath, content + entry, 'utf8');
+      } catch {}
+    }
+  }
+}
 
 export class CliRouter {
   /**

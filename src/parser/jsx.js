@@ -53,6 +53,7 @@ const PROP_MAP = {
     flex: 'layoutMode',
     gap: 'itemSpacing',
     wrap: 'layoutWrap',
+    overflow: 'overflow', scroll: 'overflow',
     p: 'padding',
     px: 'paddingHorizontal',
     py: 'paddingVertical',
@@ -115,6 +116,10 @@ function transformPropValue(key, value, props) {
         return value;
     }
     if (key === 'layoutWrap' && value === true) return 'WRAP';
+    if (key === 'overflow') {
+        const map = { scroll: 'SCROLLS', vertical: 'SCROLLS_VERTICAL', horizontal: 'SCROLLS_HORIZONTAL', both: 'SCROLLS' };
+        return map[String(value).toLowerCase()] || value;
+    }
     if (key === 'primaryAxisAlignItems' || key === 'counterAxisAlignItems' || key === 'textAlignHorizontal' || key === 'textAlignVertical') {
         const map = { start: 'MIN', center: 'CENTER', end: 'MAX', between: 'SPACE_BETWEEN', left: 'LEFT', right: 'RIGHT', top: 'TOP', bottom: 'BOTTOM' };
         return map[value] || value;
@@ -385,8 +390,14 @@ function extractContent(str, tagName, errors = [], fullJsx = "", absoluteIndex =
     let i = 0;
     const closeTag = `</${tagName}>`;
     const openTagStart = `<${tagName}`;
+    const MAX_DEPTH = 50;
 
     while (i < str.length && depth > 0) {
+        if (depth > MAX_DEPTH) {
+            pushError(errors, `Exceeded maximum tag depth of ${MAX_DEPTH}`, fullJsx, absoluteIndex + i);
+            break;
+        }
+
         if (str.slice(i).startsWith(closeTag)) {
             depth--;
             if (depth === 0) return str.slice(0, i);
@@ -524,12 +535,14 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
                 const closeIdx = afterOpen.indexOf(closeTag);
                 if (closeIdx !== -1) {
                     content = afterOpen.slice(0, closeIdx);
-                    cmd.params.props.characters = content.trim();
+                    const textContent = content.trim();
+                    if (textContent) cmd.params.props.characters = textContent;
                     endIdx += closeIdx + closeTag.length;
                 } else {
                     pushError(errors, `Unclosed TEXT tag: <${tagName}>`, fullJsxContext, absoluteStartIdx);
                     content = afterOpen;
-                    cmd.params.props.characters = content.trim();
+                    const textContent = content.trim();
+                    if (textContent) cmd.params.props.characters = textContent;
                     endIdx += content.length;
                 }
             } else if (tagName === 'SVG') {
@@ -594,9 +607,6 @@ function inferDiagnosticCode(message) {
     if (message.startsWith('Input too large')) return 'INPUT_TOO_LARGE';
     if (message.startsWith('Trailing content') || message.startsWith('Text content outside root')) return 'TRAILING_CONTENT';
     if (message.startsWith('Malformed or extremely deep tag')) return 'MALFORMED_TAG';
-    if (message.startsWith('Unclosed TEXT tag:')) return 'UNCLOSED_TEXT_TAG';
-    if (message.startsWith('Unclosed SVG tag:')) return 'UNCLOSED_SVG_TAG';
-    if (message.startsWith('Unclosed tag:')) return 'UNCLOSED_TAG';
     return 'PARSE_ERROR';
 }
 

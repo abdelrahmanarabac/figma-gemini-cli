@@ -40,10 +40,29 @@ function checkLiveness() {
 }
 checkLiveness();
 
-// Plugin connection state
-let pluginWs = null;
-let pluginConnected = false;
+// Plugin connection state — supports multi-file mode
+const pluginConnections = new Map(); // fileId -> { ws, connected, fileName }
+let activeFileId = null; // The currently active/primary file
+let multiFileMode = false;
 const pendingRequests = new Map();
+
+function getActivePlugin() {
+    if (multiFileMode) {
+        const conn = pluginConnections.get(activeFileId);
+        if (!conn || !conn.connected) return null;
+        return conn.ws;
+    }
+    // Single file mode: return first available connection
+    for (const [, conn] of pluginConnections) {
+        if (conn.connected) return conn.ws;
+    }
+    return null;
+}
+
+function isPluginConnected(fileId) {
+    if (fileId) return pluginConnections.get(fileId)?.connected || false;
+    return pluginConnections.size > 0 && [...pluginConnections.values()].some(c => c.connected);
+}
 
 // CLI Stream state (only one concurrent stream supported for simplicity)
 let streamWs = null;
@@ -52,7 +71,8 @@ let streamWs = null;
 
 async function sendToPlugin(command, params) {
     return new Promise((resolve, reject) => {
-        if (!pluginConnected || !pluginWs) {
+        const ws = getActivePlugin();
+        if (!ws) {
             reject(new Error('Figma plugin not connected. Run "connect" first.'));
             return;
         }
@@ -65,7 +85,7 @@ async function sendToPlugin(command, params) {
 
         pendingRequests.set(id, { resolve, reject, timeout });
 
-        pluginWs.send(JSON.stringify({
+        ws.send(JSON.stringify({
             action: 'command',
             id,
             command,
@@ -82,10 +102,16 @@ async function handleRequest(req, res) {
 
     // Health check
     if (req.method === 'GET' && req.url === '/health') {
+        const connectedFiles = [...pluginConnections]
+            .filter(([, c]) => c.connected)
+            .map(([id, c]) => ({ id, name: c.fileName }));
         res.end(JSON.stringify({
             status: 'ok',
-            plugin: pluginConnected,
+            plugin: isPluginConnected(),
             pid: process.pid,
+            multiFile: multiFileMode,
+            activeFile: activeFileId,
+            connectedFiles,
         }));
         return;
     }
@@ -96,7 +122,20 @@ async function handleRequest(req, res) {
         req.on('data', chunk => body += chunk);
         req.on('end', async () => {
             try {
-                const { command, params } = JSON.parse(body);
+                const { command, params, fileId } = JSON.parse(body);
+
+                // Internal: switch active file
+                if (command === '_switch' && params?.fileId && pluginConnections.has(params.fileId)) {
+                    activeFileId = params.fileId;
+                    res.end(JSON.stringify({ status: 'ok', data: { fileId: activeFileId } }));
+                    return;
+                }
+
+                // Switch active file if specified
+                if (fileId && pluginConnections.has(fileId)) {
+                    activeFileId = fileId;
+                }
+
                 const result = await sendToPlugin(command, params);
                 res.end(JSON.stringify({ status: 'ok', data: result }));
             } catch (err) {
@@ -138,7 +177,8 @@ wssStream.on('connection', (ws) => {
 
     ws.on('message', (data) => {
         // Relay EVERYTHING from CLI directly to Plugin
-        if (pluginConnected && pluginWs) {
+        const pluginWs = getActivePlugin();
+        if (pluginWs) {
             pluginWs.send(data.toString());
         } else {
             ws.send(JSON.stringify({ action: 'stream.error', error: 'Plugin not connected' }));
@@ -153,26 +193,40 @@ wssStream.on('connection', (ws) => {
 
 // Plugin WebSocket handling (Figma Side)
 wssPlugin.on('connection', (ws) => {
-    log('Plugin connected');
-    pluginWs = ws;
-    pluginConnected = true;
-
-    // Heartbeat ping
-    const heartbeatParams = { alive: true };
-    ws.on('pong', () => { heartbeatParams.alive = true; });
-    const pingInterval = setInterval(() => {
-        if (!heartbeatParams.alive) {
-            log('Plugin heartbeat timeout. Terminating connection.');
-            ws.terminate();
-            return;
-        }
-        heartbeatParams.alive = false;
-        ws.ping();
-    }, 30000);
+    log('Plugin connected (waiting for file info)');
+    const connId = randomUUID().slice(0, 8);
 
     ws.on('message', (raw) => {
         try {
             const msg = JSON.parse(raw);
+
+            // Hello handshake — registers this plugin instance
+            if (msg.type === 'hello') {
+                const fileId = msg.fileId || connId;
+                const fileName = msg.fileName || 'Unknown File';
+                multiFileMode = msg.multiFile || false;
+
+                pluginConnections.set(fileId, {
+                    ws,
+                    connected: true,
+                    fileName,
+                    connId,
+                    connectedAt: Date.now(),
+                });
+
+                // Set as active if first connection or not set
+                if (!activeFileId) activeFileId = fileId;
+
+                log(`Plugin hello: v${msg.version} | File: ${fileName} (${fileId}) | Multi: ${multiFileMode}`);
+
+                // Confirm connection back to plugin
+                ws.send(JSON.stringify({
+                    type: 'hello.ok',
+                    fileId,
+                    multiFile: multiFileMode,
+                }));
+                return;
+            }
 
             // 1. Relay all stream events back to CLI
             if (msg.action && msg.action.startsWith('stream.')) {
@@ -196,11 +250,6 @@ wssPlugin.on('connection', (ws) => {
                 }
                 return;
             }
-
-            // Hello handshake
-            if (msg.type === 'hello') {
-                log(`Plugin hello: v${msg.version}`);
-            }
         } catch (err) {
             log(`Message parse error: ${err.message}`);
         }
@@ -208,9 +257,17 @@ wssPlugin.on('connection', (ws) => {
 
     ws.on('close', () => {
         log('Plugin disconnected');
-        pluginConnected = false;
-        pluginWs = null;
-        clearInterval(pingInterval);
+        // Remove all connections for this WebSocket
+        for (const [fileId, conn] of pluginConnections) {
+            if (conn.ws === ws) {
+                conn.connected = false;
+                pluginConnections.delete(fileId);
+                if (activeFileId === fileId) {
+                    // Switch to next available file
+                    activeFileId = [...pluginConnections].find(([, c]) => c.connected)?.[0] || null;
+                }
+            }
+        }
         // Reject all pending requests
         for (const [id, pending] of pendingRequests) {
             clearTimeout(pending.timeout);

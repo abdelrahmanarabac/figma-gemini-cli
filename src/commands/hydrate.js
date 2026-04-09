@@ -27,8 +27,12 @@ class HydrateCommand extends Command {
       spinner.text = `Locating target "${target}"...`;
       let targetId = target;
       if (!target.includes(':')) {
-        const findCode = `return figma.currentPage.findOne(n => n.name === ${JSON.stringify(target)})?.id`;
-        targetId = await ctx.eval(findCode);
+        const found = await ctx.evalOp('node.find.byName', { name: target });
+        if (found.error) {
+          targetId = null;
+        } else {
+          targetId = found.id;
+        }
       }
 
       if (!targetId) {

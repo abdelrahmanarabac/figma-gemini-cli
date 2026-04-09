@@ -136,7 +136,25 @@ node src/index.js node delete {1:234}                    # delete node
 
 ---
 
-## 6. Responsive & Skeleton
+## 6. Component & Property Management
+
+Manage component sets (variants) and property definitions.
+
+```powershell
+# Create a component set from selected nodes
+node src/index.js component create-set "My Button"
+
+# Add a boolean or variant property to a set
+# Types: VARIANT, BOOLEAN, TEXT, INSTANCE_SWAP
+node src/index.js component add-prop "12:345" "State" "VARIANT" "Default"
+
+# Set property value for a specific variant
+node src/index.js component set-prop "12:346" "State" "Hover"
+```
+
+---
+
+## 7. Responsive & Skeleton
 
 ```powershell
 # Clone at multiple breakpoints (375, 768, 1440)
@@ -172,8 +190,48 @@ This audit is currently read-only and focuses on text contrast failures.
 
 ## 9. Exports
 
+### `export` — Design Tokens to Multiple Formats
+Export variables/collections to engineering-ready formats.
+
+| Flag | Effect |
+|---|---|
+| `-o, --output <dir>` | Output directory (default: `dist`) |
+| `-f, --format <format>` | Output format (see list below) |
+| `--all` | Export to **ALL** supported formats at once |
+| `--collection <name>` | Filter to a specific collection by name or ID |
+| `--list-formats` | Print all supported formats and exit |
+
+**Supported Formats:**
+
+| Format | File | Target Platform |
+|---|---|---|
+| `json` | `tokens.json` | Flat key-value (generic) |
+| `w3c-dtcg` | `tokens.json` | W3C Design Tokens spec |
+| `css` | `tokens.css` | CSS Custom Properties |
+| `scss` | `tokens.scss` | SCSS Variables |
+| `tailwind` | `tokens.js` | Tailwind CSS v3 config |
+| `tailwind-v4` | `tokens.css` | Tailwind CSS v4 `@theme` |
+| `typescript` | `tokens.ts` | TypeScript interfaces |
+| `android` | `tokens.xml` | Android `res/values/` |
+| `swiftui` | `tokens.swift` | SwiftUI `Color` extensions |
+| `flutter` | `tokens.dart` | Flutter `Color` constants |
+| `react-native` | `tokens.js` | React Native styles |
+
 ```powershell
-node src/index.js export-zip -o {dist}
+# Export as CSS custom properties
+node src/index.js export --format css -o ./tokens
+
+# Export to ALL formats at once
+node src/index.js export --all -o ./design-tokens
+
+# Export only the "Semantic Colors" collection as Tailwind v4
+node src/index.js export --format tailwind-v4 --collection {Semantic Colors}
+
+# List all supported formats
+node src/index.js export --list-formats
+
+# Export W3C DTCG format for Style Dictionary pipeline
+node src/index.js export --format w3c-dtcg -o ./tokens
 ```
 
 ---

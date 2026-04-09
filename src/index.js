@@ -38,6 +38,6 @@ const router = new CliRouter('figma-gemini-cli', pkg.version, pkg.description, {
 
 (async () => {
   await router.discoverCommands(join(__dirname, 'commands'));
-  await router.discoverCommands(join(__dirname, 'capabilities'));
+
   router.run(process.argv);
 })();

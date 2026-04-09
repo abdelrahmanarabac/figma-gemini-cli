@@ -20,11 +20,19 @@ class RunCommand extends Command {
     
     try {
       const code = readFileSync(filePath, 'utf8');
-      
-      // We wrap the code in an async block if it's not already
       const wrappedCode = code.includes('async') ? code : `(async () => { ${code} })()`;
-      
-      const result = await ctx.eval(wrappedCode);
+
+      const result = await ctx.evalOp('script.run', { code: wrappedCode });
+      if (result && result.error) {
+        process.exitCode = 1;
+        spinner.fail('Script execution failed', {
+          file,
+          filePath,
+          executed: false,
+          error: result.error,
+        });
+        return;
+      }
       const payload = {
         file,
         filePath,

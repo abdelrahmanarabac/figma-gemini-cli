@@ -4,7 +4,7 @@
 [![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen.svg)](https://nodejs.org/)
 [![Figma](https://img.shields.io/badge/Figma-Desktop-blue.svg)](https://www.figma.com/)
 
-A professional Node.js-based command-line interface for driving Figma Desktop through a local plugin bridge. The current surface focuses on guarded rendering, template-driven MoE generation, auditing, and token workflows.
+A professional Node.js-based command-line interface for driving Figma Desktop through a local plugin bridge. The current surface focuses on guarded rendering, automated generation via AI, auditing, and token-driven workflows.
 
 ---
 
@@ -70,7 +70,7 @@ npm install
    node src/index.js status
    ```
 
-3. **Generate a design via the MoE pipeline**:
+3. **Generate a design via the pipeline**:
    ```bash
    node src/index.js generate "Create a modern login screen for a SaaS app with dark mode"
    ```
@@ -97,7 +97,7 @@ High-level commands for creating and rendering UI elements.
 
 | Command | Description | Example |
 | :--- | :--- | :--- |
-| `generate <description>` | Runs the MoE generation pipeline and renders when validation passes. | `node src/index.js generate "Create a pricing table"` |
+| `generate <description>` | Runs the generation pipeline and renders when validation passes. | `node src/index.js generate "Create a pricing table"` |
 | `render <jsx>` | Renders a JSX string directly into Figma. | `node src/index.js render '<Frame bg="#f0f" w={100} h={100} />'` |
 | `render-batch` | Executes a sequence of rendering commands from a file. | `node src/index.js render-batch ./scene.json` |
 | `audit a11y --page` | Audits text contrast on the current page. | `node src/index.js audit a11y --page` |
@@ -118,7 +118,7 @@ Helper commands for documentation and export workflows.
 
 | Command | Description | Example |
 | :--- | :--- | :--- |
-| `export-zip` | Bundles tokens and themes into a portable ZIP. | `node src/index.js export-zip -o ./backup` |
+| `export` | Export tokens to 11 formats (JSON, CSS, SCSS, Tailwind, TypeScript, Android, SwiftUI, Flutter, React Native). | `node src/index.js export --all -o ./tokens` |
 | `send-feedback` | Sends feedback to the maintainer. | `node src/index.js send-feedback "Great tool"` |
 
 ---
@@ -127,10 +127,11 @@ Helper commands for documentation and export workflows.
 
 *   **`src/cli/`**: The routing and execution engine.
 *   **`src/commands/`**: Modular command definitions.
-*   **`src/agents/`**: Mix-of-experts orchestration and specialist agents.
+*   **`src/pipeline/`**: Explicit design generation and validation workflow (prepare → build → validate).
 *   **`src/transport/`**: Background daemon handling WebSocket traffic.
 *   **`src/parser/`**: JSX-to-Figma AST translation logic.
-*   **`plugin/`**: Native Figma environment bridge.
+*   **`src/utils/`**: Helper and abstraction utilities (file IO, common figma actions).
+*   **`plugin/`**: Native Figma environment bridge with strict Logic and UI separation.
 
 ---
 

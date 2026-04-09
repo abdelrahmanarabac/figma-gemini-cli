@@ -61,46 +61,7 @@ export function buildTokenCatalog(inventory = {}) {
 
 export async function inspectInventory(ctx) {
   try {
-    // Try the safe operation-based approach first
-    let inventory;
-    try {
-      inventory = await ctx.evalOp('inventory.scan');
-    } catch {
-      // Fallback to legacy code-based eval for older plugin versions
-      inventory = await ctx.eval(`
-        if (typeof figma.loadAllPagesAsync === 'function') {
-          try { await figma.loadAllPagesAsync(); } catch (error) {}
-        }
-        const collections = await figma.variables.getLocalVariableCollectionsAsync();
-        const variables = await figma.variables.getLocalVariablesAsync();
-        const textStyles = await figma.getLocalTextStylesAsync();
-        const components = figma.root.findAll(node => node.type === 'COMPONENT' || node.type === 'COMPONENT_SET');
-        return {
-          pageName: figma.currentPage.name,
-          selection: figma.currentPage.selection.map(node => ({ id: node.id, name: node.name, type: node.type })),
-          variableCollections: collections.map(collection => ({
-            id: collection.id,
-            name: collection.name,
-            modes: collection.modes.map(mode => mode.name),
-          })),
-          variables: variables.map(variable => {
-            const collection = collections.find(item => item.id === variable.variableCollectionId);
-            return {
-              id: variable.id,
-              name: variable.name,
-              type: variable.resolvedType,
-              collectionName: collection ? collection.name : '',
-            };
-          }),
-          textStyles: textStyles.map(style => ({ id: style.id, name: style.name })),
-          components: components.slice(0, 300).map(component => ({
-            id: component.id,
-            name: component.name,
-            type: component.type,
-          })),
-        };
-      `);
-    }
+    const inventory = await ctx.evalOp('inventory.scan');
 
     const tokenCatalog = buildTokenCatalog(inventory);
     const tokenCollections = Array.isArray(inventory.variableCollections) ? inventory.variableCollections : [];

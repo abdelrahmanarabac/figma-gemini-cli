@@ -1,6 +1,6 @@
 import { Command } from '../cli/command.js';
 import { readFileSync } from 'fs';
-import { ensurePluginConnection } from '../utils/connection.js';
+import { checkHealth } from '../transport/bridge.js';
 import { validateGuardian } from '../pipeline/validate.js';
 
 async function readStdin() {
@@ -10,6 +10,39 @@ async function readStdin() {
     data += chunk;
   }
   return data.trim();
+}
+
+async function ensurePluginConnection(ctx, wait = false) {
+  const check = async () => {
+    try {
+      const health = await checkHealth();
+      return health.status === 'ok' && health.plugin;
+    } catch {
+      return false;
+    }
+  };
+
+  if (wait) {
+    let spinner;
+    if (!ctx.isJson) spinner = ctx.startSpinner('Waiting for Figma plugin connection...');
+    for (let i = 0; i < 30; i++) {
+      if (await check()) {
+        if (spinner) spinner.succeed('Connected to Figma plugin.');
+        return true;
+      }
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    if (spinner) spinner.fail('Connection timeout.');
+    ctx.logError('Timed out waiting for Figma plugin to connect.');
+    return false;
+  }
+
+  if (await check()) {
+    return true;
+  }
+
+  ctx.logError('Not connected to Figma. Open the FigCli plugin and run "figma-gemini-cli connect".');
+  return false;
 }
 
 function buildGuardianSummary(report) {
@@ -105,11 +138,13 @@ class RenderCommand extends Command {
 
     try {
       // Guardian pre-render validation (direct function call)
+      let preCompiledCommands = null;
       if (options.validate !== false) {
         try {
           const { compileJSX } = await import('../parser/jsx.js');
           const compileResult = compileJSX(inputJsx);
           const { commands, diagnostics, metadata, ast } = compileResult;
+          preCompiledCommands = commands;
           const blockingDiagnostics = diagnostics.filter(d => d.severity === 'error');
 
           if (blockingDiagnostics.length > 0) {
@@ -147,7 +182,13 @@ class RenderCommand extends Command {
         return;
       }
 
-      const result = await ctx.render(inputJsx);
+      let result;
+      if (options.validate !== false && preCompiledCommands) {
+        result = await ctx.renderCompiled(preCompiledCommands);
+      } else {
+        result = await ctx.render(inputJsx);
+      }
+
       if (result && result.error) {
          ctx.logError(`Render failed: ${result.error}`);
       } else {
@@ -266,7 +307,7 @@ class EvalCommand extends Command {
       return;
     }
 
-    // Legacy code-based eval (falls back to pattern matching)
+    // Legacy code-based eval — routed through script.run operation
     let inputCode = code;
     if (!inputCode) {
       inputCode = await readStdin();
@@ -277,8 +318,12 @@ class EvalCommand extends Command {
       return;
     }
     try {
-      const result = await ctx.eval(inputCode);
-      ctx.logSuccess('Executed', result);
+      const result = await ctx.evalOp('script.run', { code: inputCode });
+      if (result && result.error) {
+        ctx.logError(`Eval error: ${result.error}`);
+      } else {
+        ctx.logSuccess('Executed', result);
+      }
     } catch (err) {
       ctx.logError(`Eval error: ${err.message}`);
     }
@@ -292,12 +337,7 @@ class FindCommand extends Command {
 
   async execute(ctx, options, query) {
     try {
-      const code = `
-        const query = ${JSON.stringify(query)};
-        const nodes = figma.currentPage.findAll(n => n.name.includes(query));
-        return nodes.map(n => ({ id: n.id, name: n.name, type: n.type }));
-      `;
-      const result = await ctx.eval(code);
+      const result = await ctx.evalOp('node.find', { query });
       if (result && result.length > 0) {
         ctx.logSuccess(`Found ${result.length} nodes:`, result);
       } else {
@@ -316,26 +356,14 @@ class GetCommand extends Command {
 
   async execute(ctx, options, id) {
     try {
-      const code = `
-        let n;
-        const id = ${JSON.stringify(id)};
-        if (id && id !== "undefined") {
-          n = await figma.getNodeByIdAsync(id);
-        } else {
-          n = figma.currentPage.selection[0];
-        }
-
-        if (!n) return null;
-        return {
-          id: n.id,
-          name: n.name,
-          type: n.type,
-          x: n.x, y: n.y,
-          width: n.width, height: n.height
-        };
-      `;
-      const result = await ctx.eval(code);
-      if (result) {
+      let result;
+      if (id && id !== "undefined") {
+        result = await ctx.evalOp('node.find.byId', { id });
+      } else {
+        const sel = await ctx.evalOp('node.selection');
+        result = sel && sel.length > 0 ? sel[0] : null;
+      }
+      if (result && !result.error) {
         ctx.logSuccess('Node info:', result);
       } else {
         ctx.logError(id ? `Node ${id} not found.` : 'No node selected.');
@@ -439,8 +467,8 @@ class UpdateCommand extends Command {
     }
 
     if (!targetId || targetId === 'selected') {
-       const selCode = `return figma.currentPage.selection[0]?.id`;
-       targetId = await ctx.eval(selCode);
+       const sel = await ctx.evalOp('node.selection');
+       targetId = sel && sel.length > 0 ? sel[0].id : null;
     }
 
     if (!targetId || !inputJsx) {
@@ -494,9 +522,9 @@ class NodeCommand extends Command {
 
   async execute(ctx, options, action, ...ids) {
     let targetIds = ids;
-    if (!targetIds || targetIds.length === 0) {
-      const selCode = `return figma.currentPage.selection.map(n => n.id)`;
-      targetIds = await ctx.eval(selCode);
+    if (action !== 'autolayout' && (!targetIds || targetIds.length === 0)) {
+      const sel = await ctx.evalOp('node.selection');
+      if (sel) targetIds = sel.map(n => n.id);
     }
 
     if (!targetIds || targetIds.length === 0) {
@@ -505,45 +533,43 @@ class NodeCommand extends Command {
     }
 
     try {
-      let code = '';
       if (action === 'to-component') {
-        code = `
-          const ids = "${targetIds.join(',')}".split(',');
-          const results = [];
-          for (const id of ids) {
-            const n = await figma.getNodeByIdAsync(id);
-            if (!n) { results.push({ id, error: 'Not found' }); continue; }
-            try {
-              const comp = figma.createComponent();
-              comp.name = n.name;
-              comp.resize(n.width, n.height);
-              comp.x = n.x; comp.y = n.y;
-              if (n.parent) n.parent.appendChild(comp);
-              comp.appendChild(n);
-              n.x = 0; n.y = 0;
-              results.push({ id, componentId: comp.id });
-            } catch(e) { results.push({ id, error: e.message }); }
-          }
-          return results;
-        `;
+        const results = [];
+        for (const id of targetIds) {
+          const res = await ctx.evalOp('node.to_component', { id });
+          results.push(res);
+        }
+        ctx.logSuccess(`Executed ${action}`, results);
       } else if (action === 'delete') {
-        code = `
-          const ids = "${targetIds.join(',')}".split(',');
-          const results = [];
-          for (const id of ids) {
-            const n = await figma.getNodeByIdAsync(id);
-            if (n) { n.remove(); results.push({ id, deleted: true }); }
-            else { results.push({ id, deleted: false }); }
-          }
-          return results;
-        `;
+        const results = [];
+        for (const id of targetIds) {
+          const res = await ctx.evalOp('node.delete', { id });
+          results.push(res);
+        }
+        ctx.logSuccess(`Executed ${action}`, results);
+      } else if (action === 'autolayout') {
+        const mode = targetIds.pop();
+        if (!mode || !['row', 'col', 'none'].includes(mode)) {
+          ctx.logError('Usage: node autolayout <id> <row|col|none>');
+          return;
+        }
+        
+        let applyIds = targetIds;
+        if (applyIds.length === 0) {
+          const sel = await ctx.evalOp('node.selection');
+          if (sel) applyIds = sel.map(n => n.id);
+        }
+
+        const results = [];
+        for (const id of applyIds) {
+          const res = await ctx.evalOp('node.setAutoLayout', { id, mode });
+          results.push(res);
+        }
+        ctx.logSuccess(`Executed autolayout config`, results);
       } else {
         ctx.logError(`Unknown action: ${action}`);
         return;
       }
-
-      const result = await ctx.eval(code);
-      ctx.logSuccess(`Executed ${action}`, result);
     } catch (err) {
       ctx.logError(`Node error: ${err.message}`);
     }

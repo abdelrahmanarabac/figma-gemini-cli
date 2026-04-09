@@ -57,15 +57,24 @@ export async function sendCommand(command, params = {}, opts = {}) {
     throw lastError;
 }
 
+let _healthCache = null;
+let _healthCacheTime = 0;
+
 /**
- * Check daemon health.
+ * Check daemon health with TTL cache.
  * @returns {Promise<{ status: string, plugin: boolean }>}
  */
-export async function checkHealth() {
+export async function checkHealth(ttlMs = 5000) {
+    if (_healthCache && Date.now() - _healthCacheTime < ttlMs) {
+        return _healthCache;
+    }
+
     const daemonUrl = getDaemonUrl();
     try {
         const res = await fetch(`${daemonUrl}/health`, { signal: AbortSignal.timeout(3000) });
-        return await res.json();
+        _healthCache = await res.json();
+        _healthCacheTime = Date.now();
+        return _healthCache;
     } catch {
         return { status: 'unreachable', plugin: false };
     }
@@ -73,7 +82,7 @@ export async function checkHealth() {
 
 /**
  * Send a batch of commands.
- * Automatically chunks large arrays to prevent payload overflows.
+ * Automatically chunks large arrays and sends them concurrently.
  * @param {object[]} commands - Array of { command, params }
  * @returns {Promise<object>}
  */
@@ -83,11 +92,23 @@ export async function sendBatch(commands, opts = {}) {
     }
 
     const CHUNK_SIZE = 500;
+    const CONCURRENCY = 3;
     const results = [];
+    const chunks = [];
+    
     for (let i = 0; i < commands.length; i += CHUNK_SIZE) {
-        const chunk = commands.slice(i, i + CHUNK_SIZE);
-        const res = await sendCommand('batch', { commands: chunk }, { timeout: opts.timeout || 60000 });
-        results.push(res);
+        chunks.push(commands.slice(i, i + CHUNK_SIZE));
     }
+
+    // Process chunks concurrently with limit
+    for (let i = 0; i < chunks.length; i += CONCURRENCY) {
+        const activeChunks = chunks.slice(i, i + CONCURRENCY);
+        const chunkPromises = activeChunks.map(chunk => 
+            sendCommand('batch', { commands: chunk }, { timeout: opts.timeout || 60000 })
+        );
+        const chunkResults = await Promise.all(chunkPromises);
+        results.push(...chunkResults);
+    }
+
     return { status: 'ok', data: results };
 }

@@ -148,25 +148,6 @@ export class CommandContext {
 
   // ── Figma Execution ──────────────────────────────────
 
-  async eval(code) {
-    try {
-      // First try: operation-based dispatch (safe, CSP-compliant)
-      const result = await this.command('eval', { code });
-      return result?.data;
-    } catch (e) {
-      // Fallback: fast eval via daemon direct transport
-      if (this._deps.fastEval) {
-        try {
-          return await this._deps.fastEval(code);
-        } catch (fastErr) {
-          // If fastEval also fails, throw the original error
-          throw e;
-        }
-      }
-      throw e;
-    }
-  }
-
   /**
    * Execute a named eval operation using the safe operation-based dispatch.
    * This is the preferred method — avoids raw code strings entirely.
@@ -188,6 +169,11 @@ export class CommandContext {
       throw new Error('Failed to parse JSX:\n' + errors.join('\n'));
     }
 
+    return await sendBatch(commands);
+  }
+
+  async renderCompiled(commands) {
+    const { sendBatch } = await import('../transport/bridge.js');
     return await sendBatch(commands);
   }
 
