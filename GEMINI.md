@@ -50,7 +50,8 @@ const result = await run(ctx, jsx, { mode: 'Light' });
 
 ### Workspace Rules
 - **No internal code exposure** to user
-- **No temp file creation** — use `--code` or stdin
+- **No temp file creation in root** — if temp files are needed, create them in a `_temp/` folder
+- **Delete `_temp/` folder after task completion** — workspace must stay clean
 - **No workspace clutter** — keep root clean
 
 ---
@@ -64,7 +65,9 @@ const result = await run(ctx, jsx, { mode: 'Light' });
 ### Auto Layout Mandates
 - All Frames: explicit `w` + `h` (numbers, `fill`, or `hug`)
 - Root frames: **fixed numeric** dimensions only (e.g., `w={1440} h={1024}`)
-- Icons: `<SVG content={...} w={24} h={24} />` — never text placeholders
+- **Main screen frames MUST have `p={16}` margin** (e.g., home, details, tracking screens)
+- **All Text layers MUST have `w={fill}`** — text should expand to fill available width
+- Icons: `<SVG content={...} w={24} h={24} />` or `<Icon name={...} />` — **NEVER use emojis as icons**
 - Defaults: `rounded={12}` `p={24}` `gap={16}`
 
 ### Shell Safety (PowerShell)
@@ -79,7 +82,8 @@ const result = await run(ctx, jsx, { mode: 'Light' });
 1. **Inventory**: `var list` + `style list` before generating
 2. **No raw values**: Guardian flags hex colors as violations
 3. **Missing tokens**: Create with `var create` before referencing
-4. **ID Preservation**: `inspect {id}` → `update {id} "{JSX}"` — never delete/recreate
+4. **Sync tokens**: `design tokens-sync --to {TargetFile}` for direct Figma-to-Figma sync, or `--from {A} --to {B}` between any two connected files
+5. **ID Preservation**: `inspect {id}` → `update {id} "{JSX}"` — never delete/recreate
 
 ---
 
@@ -92,6 +96,8 @@ const result = await run(ctx, jsx, { mode: 'Light' });
 | `alignItems` / `justifyContent` | `items` / `justify` |
 | Mixing UI and Logic in Plugin code | Separate explicitly into `/ui` and `/logic` directories in `plugin/` |
 | Hardcoding framework data (e.g., Tailwind) | Use token-based APIs like `tokens preset` to drive styles dynamically |
+| `flex={1}` (Numeric flex) | `layoutGrow={1}` (`flex` maps strictly to `layoutMode` row/col) |
+| Inline `.map()` loops in JSX | Generate JSX strings externally in a JS script / memory buffer |
 
 ---
 
@@ -102,3 +108,6 @@ const result = await run(ctx, jsx, { mode: 'Light' });
 4. ✅ No temp files created?
 5. ✅ Guardian passed all rules?
 6. ✅ A11y confirmed WCAG contrast?
+7. ✅ All Text layers have `w={fill}`?
+8. ✅ Main screen frames have `p={16}` margin?
+9. ✅ NO emojis used as icons — proper SVG or `<Icon>` components only?

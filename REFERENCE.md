@@ -138,18 +138,203 @@ node src/index.js node delete {1:234}                    # delete node
 
 ## 6. Component & Property Management
 
-Manage component sets (variants) and property definitions.
+Create, inspect, and manage Figma Components and Component Sets (Variants) with full property control.
+
+### Overview
+
+| Command | Description |
+|---|---|
+| `component create [id]` | Convert a selected node into a standalone Component |
+| `component create-set <name> [ids...]` | Combine selected nodes into a Component Set (Variants) |
+| `component add-variant <id> <name> [props...]` | Add a variant to a component or component set |
+| `component list` | List all Component Sets and standalone Components in the file |
+| `component find <pattern>` | Find components by name pattern |
+| `component rename <id> <newName>` | Rename a component or component set |
+| `component detach <id>` | Convert a component or component set back to regular frames |
+| `component delete <id>` | Delete a component or component set |
+| `component inspect <id>` | List all properties and variants on a Component Set |
+| `component add-prop <id> <name> <type> [default]` | Add a property definition (VARIANT, BOOLEAN, TEXT, INSTANCE_SWAP) |
+| `component set-prop <id> <propertyName> <value>` | Set a variant name by assigning a property value |
+| `component edit-prop <id> <oldName> <newName>` | Rename a property on a Component Set |
+| `component delete-prop <id> <name>` | Delete a property from a Component Set |
+| `component update-text <id> <text>` | Fill empty text nodes across all variants |
+
+### Property Types
+
+| Type | Use Case | Example |
+|---|---|---|
+| `VARIANT` | Toggle between visual states | `State=Default`, `State=Hover` |
+| `BOOLEAN` | Show/hide elements | `HasIcon=true` |
+| `TEXT` | Customizable labels | `Label=Submit` |
+| `INSTANCE_SWAP` | Swap nested components | `Icon=ChevronRight` |
+
+### Create a Component from Selection
 
 ```powershell
-# Create a component set from selected nodes
-node src/index.js component create-set "My Button"
+# Select a node in Figma, then convert it
+node src/index.js select "My Frame"
+node src/index.js component create
 
-# Add a boolean or variant property to a set
-# Types: VARIANT, BOOLEAN, TEXT, INSTANCE_SWAP
-node src/index.js component add-prop "12:345" "State" "VARIANT" "Default"
+# Or specify a node ID directly
+node src/index.js component create "12:345"
+```
 
-# Set property value for a specific variant
+### List All Components
+
+```powershell
+# Human-readable tree output
+node src/index.js component list
+
+# JSON output for scripting
+node src/index.js component list --json
+```
+
+### Create a Component Set (Variants)
+
+Render 4 frames with plain names, select them, and combine:
+
+```powershell
+# Step 1: Render variants with plain names
+node src/index.js render --code "<Frame name={Default} w={120} h={44} ...>...</Frame>"
+node src/index.js render --code "<Frame name={Hover} w={120} h={44} x={140} bg={#2563eb} ...>...</Frame>"
+node src/index.js render --code "<Frame name={Pressed} w={120} h={44} x={280} bg={#1d4ed8} ...>...</Frame>"
+node src/index.js render --code "<Frame name={Disabled} w={120} h={44} x={420} bg={#9ca3af} ...>...</Frame>"
+
+# Step 2: Select all and create
+node src/index.js select "Default" "Hover" "Pressed" "Disabled"
+node src/index.js component create-set "Button"
+
+# Step 3: Rename the auto-generated property
+node src/index.js component edit-prop "{ID}" "Property 1" "State"
+```
+
+You can also name frames with key=value patterns (e.g., `State=Default`) — the CLI will auto-discover the property:
+
+```powershell
+# With key=value naming in frame names
+node src/index.js component create-set "Button"
+# Auto-discovers "State" property from names like "State=Default,State=Hover"
+```
+
+### Add a Variant to an Existing Component or Component Set
+
+Clone the first variant, apply overrides, and add to the set:
+
+```powershell
+# Add a variant to a standalone component (auto-creates Component Set)
+node src/index.js component add-variant "{ComponentID}" "Hover" "State=Hover,bg=#2563eb"
+
+# Add a variant to an existing Component Set
+node src/index.js component add-variant "{ComponentSetID}" "Pressed" "State=Pressed,bg=#1d4ed8"
+```
+
+**Property syntax:** `Key=Value` pairs for variant naming, `bg=#hex` for fill override.
+
+### Inspect a Component Set
+
+Shows all property definitions, variant options, defaults, and the full variant tree:
+
+```powershell
+node src/index.js component inspect "12:345"
+```
+
+**Example output:**
+```
+Component Set: Button (12:345)
+  ● Button  [12:345]
+    ├─ State=Default  [12:346]
+    ├─ State=Hover  [12:347]
+    ├─ State=Pressed  [12:348]
+    └─ State=Disabled  [12:349]
+  Properties:
+    • State → VARIANT [Default, Hover, Pressed, Disabled] (default: Default)
+```
+
+### Add a Property to a Component Set
+
+```powershell
+# Boolean property
+node src/index.js component add-prop "12:345" "HasIcon" "BOOLEAN" "false"
+
+# Variant property with options
+node src/index.js component add-prop "12:345" "Size" "VARIANT" "Medium"
+
+# Text property (customizable label)
+node src/index.js component add-prop "12:345" "Label" "TEXT" "Button"
+
+# Instance swap property
+node src/index.js component add-prop "12:345" "Icon" "INSTANCE_SWAP"
+```
+
+### Set a Variant Property (Rename a Variant)
+
+Assigns `propertyName=value` to the variant's name (Figma's naming convention):
+
+```powershell
 node src/index.js component set-prop "12:346" "State" "Hover"
+# Result: variant "12:346" is renamed to "State=Hover"
+```
+
+### Rename a Property
+
+```powershell
+node src/index.js component edit-prop "12:345" "Property 1" "State"
+# Works even when Figma API blocks renameComponentProperty
+```
+
+### Delete a Property
+
+Removes the property from the Component Set and cleans up all variant names:
+
+```powershell
+node src/index.js component delete-prop "12:345" "HasIcon"
+```
+
+### Update Empty Text Across Variants
+
+Fills all empty text nodes in every variant with the provided string:
+
+```powershell
+node src/index.js component update-text "12:345" "Click me"
+```
+
+### Rename a Component or Component Set
+
+```powershell
+node src/index.js component rename "165:167" "Primary Button"
+```
+
+### Find Components by Name Pattern
+
+Searches all components and component sets in the file:
+
+```powershell
+# Search by partial name
+node src/index.js component find "Button"
+
+# Search for all components with "icon" in the name
+node src/index.js component find "icon"
+
+# JSON output for scripting
+node src/index.js component find "Card" --json
+```
+
+### Detach a Component (Convert to Frames)
+
+Converts a component or component set back to regular frames:
+
+```powershell
+# Detach a single component to a frame
+node src/index.js component detach "12:345"
+
+# Detach an entire component set (all variants become frames)
+node src/index.js component detach "12:350"
+```
+
+### Delete a Component or Component Set
+
+```powershell
+node src/index.js component delete "12:345"
 ```
 
 ---
@@ -166,7 +351,7 @@ node src/index.js skeleton {Profile_Card} --color {#e2e8f0}
 
 ---
 
-## 7. Prototyping
+## 8. Prototyping
 
 ```powershell
 node src/index.js proto link {Button} {Target_Frame} --trigger {ON_CLICK} --transition {SMART_ANIMATE}
@@ -174,7 +359,7 @@ node src/index.js proto link {Button} {Target_Frame} --trigger {ON_CLICK} --tran
 
 ---
 
-## 8. Auditing
+## 9. Auditing
 
 ```powershell
 # Accessibility audit for the current page
@@ -188,7 +373,7 @@ This audit is currently read-only and focuses on text contrast failures.
 
 ---
 
-## 9. Exports
+## 10. Exports
 
 ### `export` — Design Tokens to Multiple Formats
 Export variables/collections to engineering-ready formats.
@@ -236,7 +421,7 @@ node src/index.js export --format w3c-dtcg -o ./tokens
 
 ---
 
-## 10. Design Workflow (Alfa)
+## 11. Design Workflow (Alfa)
 
 ```powershell
 node src/index.js design start         # scaffold project
@@ -245,9 +430,42 @@ node src/index.js design tokens        # configure token palette
 node src/index.js design status        # workflow progress
 ```
 
+### Token Sync
+
+Direct Figma-to-Figma token synchronization. No local files involved.
+
+```powershell
+# Sync from current active file → another connected file
+node src/index.js design tokens-sync --to {Design System v2}
+
+# Sync between two specific files
+node src/index.js design tokens-sync --from {MyApp_Design_v1} --to {MyApp_Design_v2}
+
+# Sync only a specific collection
+node src/index.js design tokens-sync --to {Target_File} --collection {Semantic Colors}
+
+# Dry run (preview without changes)
+node src/index.js design tokens-sync --to {Target_File} --dry-run
+
+# Merge mode — skip tokens that already exist in target
+node src/index.js design tokens-sync --to {Target_File} --merge
+```
+
+| Flag | Effect |
+|---|---|
+| `--from <fileId\|name>` | Source file (default: current active file) |
+| `--to <fileId\|name>` | Target file (default: current active file) |
+| `--collection <name>` | Sync only this collection |
+| `--dry-run` | Preview what would be synced |
+| `--merge` | Skip existing tokens in target |
+| `--force` | Skip confirmation prompt |
+
+> **Requires multi-file mode** — connect multiple Figma files via the plugin before syncing.
+> Use `files` to list connected files, `switch <name>` to change active file.
+
 ---
 
-## 11. Advanced Execution
+## 12. Advanced Execution
 
 ```powershell
 # Inline JavaScript in Figma environment
@@ -259,7 +477,7 @@ node src/index.js run path/to/script.js
 
 ---
 
-## 12. Data Hydration
+## 13. Data Hydration
 
 ```powershell
 # Inject JSON data into Figma components matching layer names starting with #
@@ -268,7 +486,7 @@ node src/index.js hydrate {data.json} {Card_Component} --clone
 
 ---
 
-## 13. Pipeline Modules
+## 14. Pipeline Modules
 
 | File | Role |
 |---|---|
@@ -282,7 +500,7 @@ node src/index.js hydrate {data.json} {Card_Component} --clone
 
 ---
 
-## 14. Utilities
+## 15. Utilities
 
 ```powershell
 node src/index.js send-feedback "Great tool!"

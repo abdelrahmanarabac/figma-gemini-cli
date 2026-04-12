@@ -80,8 +80,8 @@ async function sendToPlugin(command, params) {
         const id = randomUUID();
         const timeout = setTimeout(() => {
             pendingRequests.delete(id);
-            reject(new Error(`Command "${command}" timed out after 30s`));
-        }, 30000);
+            reject(new Error(`Command "${command}" timed out after 120s`));
+        }, 120000);
 
         pendingRequests.set(id, { resolve, reject, timeout });
 

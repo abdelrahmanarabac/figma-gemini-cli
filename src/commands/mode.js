@@ -166,8 +166,95 @@ class ModeMultiCommand extends Command {
   }
 }
 
+class ModeDeleteCommand extends Command {
+  name = 'mode delete <collectionName> <modeName>';
+  description = 'Delete a mode from a collection';
+  needsConnection = true;
+
+  async execute(ctx, options, collectionName, modeName) {
+    const spinner = ctx.startSpinner(`Deleting mode "${modeName}" from "${collectionName}"...`);
+    try {
+      const result = await ctx.evalOp('mode.delete', {
+        collectionRef: collectionName,
+        modeRef: modeName,
+      });
+      if (!result.success) throw new Error(result.error);
+      spinner.succeed(`Deleted mode "${modeName}" from "${collectionName}"`);
+    } catch (err) {
+      spinner.fail(`Failed: ${err.message}`);
+    }
+  }
+}
+
+class ThemeToggleCommand extends Command {
+  name = 'theme toggle <mode>';
+  description = 'Switch all collections to a specific mode (e.g., Light, Dark)';
+  needsConnection = true;
+
+  async execute(ctx, options, mode) {
+    const spinner = ctx.startSpinner(`Switching all collections to "${mode}"...`);
+    try {
+      const result = await ctx.evalOp('theme.toggle', { targetMode: mode });
+      if (result.error) throw new Error(result.error);
+
+      if (ctx.isJson) {
+        spinner.stop();
+        ctx.logSuccess(`Switched ${result.count}/${result.total} collections to "${mode}"`, result);
+        return;
+      }
+
+      spinner.succeed(`Switched ${result.count}/${result.total} collections to "${mode}"`);
+      result.results.forEach(function(r) {
+        var icon = r.success ? chalk.green('✓') : chalk.red('✗');
+        var msg = r.success
+          ? r.collection + ' → ' + r.mode
+          : r.collection + ': ' + r.error;
+        console.log(chalk.gray('   ' + icon + ' ' + msg));
+      });
+      console.log();
+    } catch (err) {
+      spinner.fail('Failed: ' + err.message);
+    }
+  }
+}
+
+class ThemeListCommand extends Command {
+  name = 'theme list';
+  description = 'List all collections and their available modes';
+  needsConnection = true;
+
+  async execute(ctx) {
+    const spinner = ctx.startSpinner('Listing themes...');
+    try {
+      const result = await ctx.evalOp('theme.list');
+      if (result.error) throw new Error(result.error);
+
+      if (ctx.isJson) {
+        spinner.stop();
+        ctx.logSuccess('Theme list', result);
+        return;
+      }
+
+      spinner.succeed('Found ' + result.themes.length + ' collection(s)');
+      result.themes.forEach(function(t) {
+        console.log(chalk.cyan('\n  ' + t.collection));
+        t.modes.forEach(function(m) {
+          var active = m.name === t.currentMode ? chalk.green(' ← active') : '';
+          console.log(chalk.gray('    • ' + m.name + active));
+        });
+      });
+      console.log();
+    } catch (err) {
+      spinner.fail('Failed: ' + err.message);
+    }
+  }
+}
+
 export default [
   new ModeAddCommand(),
   new ModeEditCommand(),
-  new ModeMultiCommand()
+  new ModeDeleteCommand(),
+  new ModeMultiCommand(),
+  new ThemeListCommand(),
+  new ThemeToggleCommand()
 ];

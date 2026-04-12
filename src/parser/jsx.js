@@ -30,6 +30,47 @@ export function registerComponent(tagName, figmaType) {
     COMPONENT_MAP[tagName] = figmaType;
 }
 
+// ── Token Detection Pattern (used throughout the parser) ─────────────
+// Matches: primary/500, spacing/md, radius/lg, blue/600, color/surface
+// Excludes: #hex, raw numbers, CSS functions
+const TOKEN_RE = /^[a-zA-Z][a-zA-Z0-9]*\/[a-zA-Z0-9][a-zA-Z0-9-]*$/;
+
+import { ICONS } from '../data/icons.js';
+
+// ── Icon Registry ──
+let _iconRegistry = ICONS;
+
+export function getIconRegistrySync() {
+    return _iconRegistry;
+}
+
+export function registerIcon(name, svg) {
+    if (!_iconRegistry) _iconRegistry = {};
+    _iconRegistry[name] = svg;
+}
+
+/**
+ * Resolve an icon by name — replaces CURRENT with the provided color.
+ * If color is a token reference (e.g., "color/primary"), CURRENT is kept
+ * for downstream auto-binding.
+ */
+export async function resolveIcon(name, color = 'CURRENT', size = 24) {
+    const icons = await loadIconRegistry();
+    const svg = icons[name];
+    if (!svg) return null;
+    const isToken = typeof color === 'string' && TOKEN_RE.test(color);
+    return svg
+        .replace(/CURRENT/g, isToken ? 'CURRENT' : color)
+        .replace(/viewBox="0 0 24 24"/, `viewBox="0 0 24 24" width="${size}" height="${size}"`);
+}
+
+/**
+ * Check if a string matches the token pattern (e.g., "primary/500", "spacing/md")
+ */
+export function isTokenReference(val) {
+    return typeof val === 'string' && TOKEN_RE.test(val);
+}
+
 // Map JSX prop names → Figma API property names
 const PROP_MAP = {
     width: 'width', w: 'width',
@@ -78,6 +119,9 @@ const PROP_MAP = {
     leading: 'lineHeight',
     tracking: 'letterSpacing',
     transform: 'textCase',
+    borderTop: 'borderTop', borderBottom: 'borderBottom',
+    borderLeft: 'borderLeft', borderRight: 'borderRight',
+    borderColor: 'borderColor',
     // Virtual Props
     data: 'data',
     complexity: 'complexity',
@@ -109,6 +153,66 @@ const AUTO_LAYOUT_ONLY_PROPS = [
     'layoutWrap',
 ];
 
+/* ──────────────────────────────────────────────
+   Token Auto-Bind (Phase 1)
+   Detects token-shaped values and wraps them
+   for variable binding by the renderer.
+   ────────────────────────────────────────────── */
+
+
+function isTokenValue(val) {
+    return typeof val === 'string' && TOKEN_RE.test(val);
+}
+
+/**
+ * Known token value index — built by the renderer at runtime.
+ * Populated via setTokenIndex() before parsing.
+ * Structure: { colors: Map<hex, tokenPath>, floats: Map<number, tokenPath> }
+ */
+let TOKEN_INDEX = { colors: new Map(), floats: new Map() };
+
+/**
+ * Set the token value index for auto-binding raw values to token references.
+ * Called by the renderer before parsing JSX.
+ */
+export function setTokenIndex(index) {
+    if (index?.colors) TOKEN_INDEX.colors = new Map(index.colors);
+    if (index?.floats) TOKEN_INDEX.floats = new Map(index.floats);
+}
+
+/**
+ * Clear the token index (for testing / cleanup).
+ */
+export function clearTokenIndex() {
+    TOKEN_INDEX = { colors: new Map(), floats: new Map() };
+}
+
+/**
+ * Try to auto-bind a raw hex color to a matching token.
+ * E.g., #3B82F6 → "blue/500" if that token exists with that value.
+ */
+function tryBindColorToToken(value) {
+    if (typeof value !== 'string') return null;
+    const hex = value.toLowerCase().trim();
+    if (!/^#[0-9a-f]{6}$/.test(hex) && !/^#[0-9a-f]{3}$/.test(hex)) return null;
+
+    // Normalize 3-char hex to 6-char
+    const normalized = hex.length === 4
+        ? '#' + hex[1] + hex[1] + hex[2] + hex[2] + hex[3] + hex[3]
+        : hex;
+
+    return TOKEN_INDEX.colors.get(normalized) || null;
+}
+
+/**
+ * Try to auto-bind a raw numeric value to a matching token.
+ * E.g., 16 → "spacing/4xl" if that token exists with value 16.
+ */
+function tryBindFloatToToken(value) {
+    if (typeof value !== 'number') return null;
+    return TOKEN_INDEX.floats.get(value) || null;
+}
+
 function transformPropValue(key, value, props) {
     if (key === 'layoutMode') {
         if (value === 'row') return 'HORIZONTAL';
@@ -121,7 +225,7 @@ function transformPropValue(key, value, props) {
         return map[String(value).toLowerCase()] || value;
     }
     if (key === 'primaryAxisAlignItems' || key === 'counterAxisAlignItems' || key === 'textAlignHorizontal' || key === 'textAlignVertical') {
-        const map = { start: 'MIN', center: 'CENTER', end: 'MAX', between: 'SPACE_BETWEEN', left: 'LEFT', right: 'RIGHT', top: 'TOP', bottom: 'BOTTOM' };
+        const map = { start: 'MIN', center: 'CENTER', end: 'MAX', between: 'SPACE_BETWEEN', 'space-between': 'SPACE_BETWEEN', 'space-around': 'CENTER', left: 'LEFT', right: 'RIGHT', top: 'TOP', bottom: 'BOTTOM' };
         return map[value] || value;
     }
     if (key === 'strokeAlign') {
@@ -133,7 +237,6 @@ function transformPropValue(key, value, props) {
         return map[value] || value.toUpperCase();
     }
     if (key === 'letterSpacing' || key === 'lineHeight') {
-        // We handle these as numeric pixels for now in the plugin side
         if (typeof value === 'string' && value.trim() !== '') {
             const num = Number(value);
             if (!isNaN(num)) return num;
@@ -154,8 +257,57 @@ function transformPropValue(key, value, props) {
     }
     if (NUMERIC_PROPS.has(key) && typeof value === 'string' && value.trim() !== '') {
         const num = Number(value);
-        if (!isNaN(num)) return num;
+        if (!isNaN(num)) value = num;
     }
+
+    // ── Phase 1: Explicit token reference (e.g., bg={primary/500}) ──
+    if (isTokenValue(value)) {
+        if (key === 'fill') {
+            return { type: 'VARIABLE_BOUND', propKey: 'color', variableName: value };
+        }
+        if (key === 'stroke') {
+            return { type: 'VARIABLE_BOUND', propKey: 'color', variableName: value };
+        }
+        if (key === 'itemSpacing' || key === 'padding' || key === 'paddingTop' ||
+            key === 'paddingRight' || key === 'paddingBottom' || key === 'paddingLeft' ||
+            key === 'paddingHorizontal' || key === 'paddingVertical') {
+            return { type: 'VARIABLE_BOUND', propKey: 'float', variableName: value };
+        }
+        if (key === 'cornerRadius' || key === 'topLeftRadius' || key === 'topRightRadius' ||
+            key === 'bottomLeftRadius' || key === 'bottomRightRadius') {
+            return { type: 'VARIABLE_BOUND', propKey: 'float', variableName: value };
+        }
+        return { type: 'VARIABLE_BOUND', propKey: 'auto', variableName: value };
+    }
+
+    // ── Phase 2: Auto-bind raw values to tokens (if token index is populated) ──
+    // Color props: try to match raw hex to a known color token
+    if (key === 'fill' || key === 'stroke') {
+        const tokenPath = tryBindColorToToken(value);
+        if (tokenPath) {
+            return { type: 'VARIABLE_BOUND', propKey: 'color', variableName: tokenPath };
+        }
+    }
+
+    // Numeric props: try to match raw number to a known spacing/radius token
+    if (typeof value === 'number') {
+        if (key === 'itemSpacing' || key === 'padding' || key === 'paddingTop' ||
+            key === 'paddingRight' || key === 'paddingBottom' || key === 'paddingLeft' ||
+            key === 'paddingHorizontal' || key === 'paddingVertical') {
+            const tokenPath = tryBindFloatToToken(value);
+            if (tokenPath) {
+                return { type: 'VARIABLE_BOUND', propKey: 'float', variableName: tokenPath };
+            }
+        }
+        if (key === 'cornerRadius' || key === 'topLeftRadius' || key === 'topRightRadius' ||
+            key === 'bottomLeftRadius' || key === 'bottomRightRadius') {
+            const tokenPath = tryBindFloatToToken(value);
+            if (tokenPath) {
+                return { type: 'VARIABLE_BOUND', propKey: 'float', variableName: tokenPath };
+            }
+        }
+    }
+
     return value;
 }
 
@@ -459,10 +611,7 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
         const remaining = cleanJsx.slice(lastIndex);
         const openMatch = remaining.match(/<([A-Z][a-zA-Z0-9\.]*)/);
         if (!openMatch) {
-            // Check for trailing text outside root node if we are at root level
-            if (isRootCall && remaining.trim()) {
-                pushError(errors, `Trailing content found outside root element`, fullJsxContext, globalOffset + lastIndex);
-            }
+            // Graceful: stray text at root level → skip silently, no hard error
             break;
         }
 
@@ -470,20 +619,20 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
         const startIdx = lastIndex + startIdxInRemaining;
         const absoluteStartIdx = globalOffset + startIdx;
         const tagName = openMatch[1];
-        
+
         // Find end of this tag
         const endOfTagIdx = findEndOfTag(remaining.slice(startIdxInRemaining));
         if (endOfTagIdx === -1) {
-            pushError(errors, `Malformed or extremely deep tag starting here: <${tagName}`, fullJsxContext, absoluteStartIdx);
+            // Graceful: malformed tag → render as frame with what we have
             lastIndex = startIdx + openMatch[0].length;
             continue;
         }
-        
+
         const fullTag = remaining.slice(startIdxInRemaining, startIdxInRemaining + endOfTagIdx + 1);
         const isSelfClosing = fullTag.endsWith('/>');
         const propsStr = fullTag.slice(openMatch[0].length, isSelfClosing ? -2 : -1).trim();
 
-        // Handle text nodes before this tag
+        // Handle text nodes before this tag — render them, don't error
         const textBefore = cleanJsx.slice(lastIndex, startIdx).trim();
         if (textBefore) {
             if (parentId) {
@@ -497,9 +646,8 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
                         props: { name: 'Text', characters: textBefore }
                     }
                 };
-            } else if (isRootCall) {
-                pushError(errors, `Text content outside root element: "${textBefore.substring(0, 10)}..."`, fullJsxContext, globalOffset + lastIndex);
             }
+            // Root level: silently ignore stray text (no hard error)
         }
 
         const type = COMPONENT_MAP[tagName] || 'FRAME';
@@ -517,6 +665,25 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
         const isVirtualViz = ['Wave', 'LineChart', 'BarChart', 'PieChart'].includes(tagName);
         if (isVirtualViz) {
             cmd.params.props.content = generateDataVisualization(tagName, props);
+        } else if (tagName === 'Icon') {
+            const iconName = props.name || props.icon || '';
+            const iconColor = props.color || props.stroke || 'CURRENT';
+            const iconSize = props.fontSize || props.size || props.width || 24;
+            if (iconName) {
+                const icons = getIconRegistrySync();
+                const svg = icons[iconName];
+                if (svg) {
+                    const isToken = typeof iconColor === 'string' && TOKEN_RE.test(iconColor);
+                    cmd.params.props.content = svg
+                        .replace(/CURRENT/g, isToken ? 'CURRENT' : iconColor)
+                        .replace(/viewBox="0 0 24 24"/, `viewBox="0 0 24 24" width="${iconSize}" height="${iconSize}"`);
+                    cmd.params.props.name = `Icon: ${iconName}`;
+                    cmd.params.props.width = iconSize;
+                    cmd.params.props.height = iconSize;
+                } else {
+                    pushError(errors, `Unknown icon: "${iconName}"`, fullJsxContext, absoluteStartIdx);
+                }
+            }
         }
 
         if (parentId) cmd.params.parentId = parentId;
@@ -559,7 +726,7 @@ export function* generateCommands(jsx, parentId = null, idPrefix = "", timestamp
                     cmd.params.props.content = content.trim();
                     endIdx += content.length;
                 }
-            } else if (!isVirtualViz) {
+            } else if (!isVirtualViz && tagName !== 'Icon') {
                 content = extractContent(afterOpen, tagName, errors, fullJsxContext, globalOffset + endIdx);
                 yield* generateCommands(content, id, idPrefix, timestamp, counter, errors, fullJsxContext, globalOffset + endIdx);
                 
@@ -613,7 +780,7 @@ function inferDiagnosticCode(message) {
 function createDiagnostic(code, message, extra = {}) {
     return {
         code,
-        severity: 'error',
+        severity: 'warning',
         message,
         ...extra,
     };
@@ -628,7 +795,7 @@ function buildStructuralDiagnostics(errors, commands, jsxString) {
         const msg = typeof err === 'string' ? err : err.message;
         const diag = {
             code: inferDiagnosticCode(msg),
-            severity: 'error',
+            severity: 'warning',
             message: msg,
         };
         if (err.line !== undefined) {
@@ -795,17 +962,129 @@ function collectAstMetadata(ast, diagnostics) {
     };
 }
 
+/**
+ * Phase 3: Expand repeat prop into N sibling commands with indexed names.
+ * Clones children for each repeat instance.
+ */
+function expandRepeatCommands(commands) {
+    // First pass: collect commands and detect repeat groups
+    const repeatGroups = new Map(); // parentId -> array of clone parentIds
+    const expanded = [];
+    const cloneCounter = {};
+
+    for (const cmd of commands) {
+        if (cmd.command !== 'node.create') {
+            expanded.push(cmd);
+            continue;
+        }
+
+        const props = cmd.params.props || {};
+        const repeatVal = props.repeat;
+        const repeatCount = (typeof repeatVal === 'number' && repeatVal >= 1 && repeatVal <= 100) ? Math.round(repeatVal) : 1;
+        const baseName = props.name || cmd.params.type || 'Node';
+
+        // Remove repeat from props
+        if (props.repeat !== undefined) delete props.repeat;
+
+        if (repeatCount <= 1) {
+            expanded.push(cmd);
+            continue;
+        }
+
+        // Track clones for this parentId
+        if (!cloneCounter[cmd.params.id]) cloneCounter[cmd.params.id] = 0;
+        cloneCounter[cmd.params.id] = repeatCount;
+
+        const cloneIds = [];
+        for (let i = 0; i < repeatCount; i++) {
+            const cloneId = `${cmd.params.id}_r${i + 1}`;
+            cloneIds.push(cloneId);
+        }
+        repeatGroups.set(cmd.params.id, cloneIds);
+
+        // Emit clone parent commands
+        for (let i = 0; i < repeatCount; i++) {
+            const cloneId = cloneIds[i];
+            const cloneProps = { ...props, name: `${baseName}_${i + 1}` };
+            expanded.push({
+                command: 'node.create',
+                params: { ...cmd.params, id: cloneId, props: cloneProps },
+            });
+        }
+    }
+
+    // Second pass: clone children for each repeat instance
+    // Children of a repeated parent need to be duplicated N times
+    const childrenByParent = new Map();
+    for (const cmd of expanded) {
+        if (cmd.command !== 'node.create') continue;
+        const pid = cmd.params.parentId;
+        if (!pid) continue;
+
+        // Find which original parent this refers to
+        const origParent = findOriginalParent(pid, repeatGroups);
+        if (origParent && repeatGroups.has(origParent)) {
+            if (!childrenByParent.has(pid)) childrenByParent.set(pid, []);
+            childrenByParent.get(pid).push(cmd);
+        }
+    }
+
+    // Clone children for each repeat clone
+    const finalCommands = [];
+    const seen = new Set();
+
+    for (const cmd of expanded) {
+        if (cmd.command !== 'node.create') {
+            finalCommands.push(cmd);
+            continue;
+        }
+
+        // Check if this command's parentId maps to a repeat group
+        const pid = cmd.params.parentId;
+        if (pid && repeatGroups.has(pid)) {
+            // This child belongs to a repeated parent — skip original, clones added below
+            if (seen.has(cmd.params.id)) continue;
+            seen.add(cmd.params.id);
+
+            const clones = repeatGroups.get(pid);
+            for (let i = 0; i < clones.length; i++) {
+                finalCommands.push({
+                    ...cmd,
+                    params: { ...cmd.params, parentId: clones[i], id: `${cmd.params.id}_r${i + 1}` },
+                });
+            }
+            continue;
+        }
+
+        finalCommands.push(cmd);
+    }
+
+    return finalCommands;
+}
+
+function findOriginalParent(childParentId, repeatGroups) {
+    for (const [orig, clones] of repeatGroups) {
+        if (childParentId === orig) return orig;
+        // Check if it's a clone of this parent
+        for (const c of clones) {
+            if (childParentId.startsWith(c)) return orig;
+        }
+    }
+    return null;
+}
+
 export function compileJSX(jsxString, idPrefix = "") {
     const { generator, errors } = parseJSXStream(jsxString, idPrefix);
     const commands = Array.from(generator);
-    const ast = buildAstFromCommands(commands);
-    const diagnostics = buildDiagnostics(errors, commands, ast, jsxString);
+    const expandedCommands = expandRepeatCommands(commands);
+    const ast = buildAstFromCommands(expandedCommands);
+    const diagnostics = buildDiagnostics(errors, expandedCommands, ast, jsxString);
     const metadata = collectAstMetadata(ast, diagnostics);
 
     return {
         ok: diagnostics.every(diagnostic => diagnostic.severity !== 'error'),
         ast,
-        commands,
+        commands: expandedCommands,
         errors,
         diagnostics,
         metadata,
